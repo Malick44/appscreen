@@ -4001,6 +4001,65 @@ function setupEventListeners() {
         document.getElementById('delete-project-modal').classList.remove('visible');
     });
 
+    // Export project backup
+    document.getElementById('export-project-btn').addEventListener('click', async () => {
+        if (!db) return;
+        try {
+            const dump = {};
+            for (const name of db.objectStoreNames) {
+                const tx = db.transaction(name, 'readonly');
+                const store = tx.objectStore(name);
+                dump[name] = await new Promise((resolve) => {
+                    const req = store.getAll();
+                    req.onsuccess = () => resolve(req.result);
+                    req.onerror = () => resolve([]);
+                });
+            }
+            const json = JSON.stringify(dump, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'appscreen-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+            a.click();
+            URL.revokeObjectURL(a.href);
+        } catch (e) {
+            console.error('Export failed:', e);
+            alert('Export failed: ' + e.message);
+        }
+    });
+
+    // Import project backup
+    const importInput = document.getElementById('import-project-input');
+    document.getElementById('import-project-btn').addEventListener('click', () => {
+        importInput.click();
+    });
+    importInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file || !db) return;
+        try {
+            const text = await file.text();
+            const dump = JSON.parse(text);
+            for (const storeName of Object.keys(dump)) {
+                if (!db.objectStoreNames.contains(storeName)) continue;
+                const tx = db.transaction(storeName, 'readwrite');
+                const store = tx.objectStore(storeName);
+                for (const record of dump[storeName]) {
+                    store.put(record);
+                }
+                await new Promise((resolve, reject) => {
+                    tx.oncomplete = resolve;
+                    tx.onerror = () => reject(tx.error);
+                });
+            }
+            alert('Import complete! Reloading...');
+            location.reload();
+        } catch (e) {
+            console.error('Import failed:', e);
+            alert('Import failed: ' + e.message);
+        }
+        importInput.value = '';
+    });
+
     // Apply style to all modal buttons
     document.getElementById('apply-style-cancel').addEventListener('click', () => {
         document.getElementById('apply-style-modal').classList.remove('visible');
