@@ -1,0 +1,71 @@
+[    6930ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[    6930ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[    6930ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[  128685ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[  128685ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[  128685ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1275149ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1275149ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1275149ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1296549ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1296549ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1296549ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1298032ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1298032ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1298032ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1568023ms] [ERROR] Error loading phone model: ProgressEvent @ http://localhost:8000/three-renderer.js:343
+[ 1568025ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:8000/models/iphone-15-pro-max.glb:0
+[ 1652256ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1652256ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1652256ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1652256ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1657017ms] [LOG] Loading phone model... 100% @ http://localhost:8000/three-renderer.js:340
+[ 1657028ms] [LOG] Phone model meshes: @ http://localhost:8000/three-renderer.js:244
+[ 1657028ms] [LOG]   Mesh: Object_4 | Material: backpanel @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_5 | Material: metalframe @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_6 | Material: gray @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_7 | Material: black @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_8 | Material: glass @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_9 | Material: Material.001 @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_11 | Material: backpanel @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_12 | Material: glass @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_14 | Material: metalframe @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_16 | Material: metalframe @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_18 | Material: metalframe @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_20 | Material: metalframe @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_22 | Material: metalframe @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_24 | Material: metalframe @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_25 | Material: glass @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_26 | Material: lens @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_28 | Material: metalframe @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_29 | Material: glass @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_30 | Material: lens @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_32 | Material: gray @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_34 | Material: metalframe @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_35 | Material: lens @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_37 | Material: gray @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_39 | Material: metalframe @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_40 | Material: glass @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_41 | Material: lens @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_43 | Material: black @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_45 | Material: gray @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Mesh: Object_47 | Material: gray @ http://localhost:8000/three-renderer.js:248
+[ 1657028ms] [LOG]   Glass mesh: Object_8 size: 0.000 x 0.481 area: 0.000 @ http://localhost:8000/three-renderer.js:280
+[ 1657028ms] [LOG]   Glass mesh: Object_12 size: 0.000 x 2.375 area: 0.000 @ http://localhost:8000/three-renderer.js:280
+[ 1657028ms] [LOG]   Glass mesh: Object_25 size: 1.748 x 0.033 area: 0.057 @ http://localhost:8000/three-renderer.js:280
+[ 1657028ms] [LOG]   Glass mesh: Object_29 size: 1.748 x 0.033 area: 0.057 @ http://localhost:8000/three-renderer.js:280
+[ 1657028ms] [LOG]   Glass mesh: Object_40 size: 1.748 x 0.033 area: 0.057 @ http://localhost:8000/three-renderer.js:280
+[ 1657028ms] [LOG]   -> Using largest glass mesh as screen: Object_25 @ http://localhost:8000/three-renderer.js:289
+[ 1657029ms] [LOG] Created screen overlay for iphone at: Lt @ http://localhost:8000/three-renderer.js:606
+[ 1657029ms] [LOG] Plane size: 1.6387 x 3.5518 @ http://localhost:8000/three-renderer.js:607
+[ 1657029ms] [LOG] setThreeJSRotation: iphone modelRot: {x: 0, y: 0, z: 0} user: 0 0 0 @ http://localhost:8000/three-renderer.js:694
+[ 1657029ms] [LOG] setThreeJSRotation: iphone modelRot: {x: 0, y: 0, z: 0} user: 0 0 0 @ http://localhost:8000/three-renderer.js:694
+[ 1657029ms] [LOG] Phone model loaded successfully @ http://localhost:8000/three-renderer.js:336
+[ 1802957ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1802957ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1802957ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 1802957ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 2102559ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 2102559ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 2102559ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[ 2102559ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0

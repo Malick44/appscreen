@@ -1,0 +1,110 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]:
+          - heading "Project" [level=2] [ref=e6]
+          - generic [ref=e7]:
+            - button "🇺🇸" [ref=e9] [cursor=pointer]:
+              - generic [ref=e10]: 🇺🇸
+            - button "Magical Titles - AI-generated headlines" [ref=e11] [cursor=pointer]:
+              - img [ref=e12]
+            - button "About" [ref=e14] [cursor=pointer]:
+              - img "About" [ref=e15]
+            - button "Settings" [ref=e16] [cursor=pointer]:
+              - img [ref=e17]
+        - generic [ref=e20]:
+          - button "Default Project 0 screenshots" [ref=e22] [cursor=pointer]:
+            - generic [ref=e23]:
+              - generic [ref=e24]: Default Project
+              - generic [ref=e25]: 0 screenshots
+            - img [ref=e26]
+          - generic [ref=e28]:
+            - button "New Project" [ref=e29] [cursor=pointer]:
+              - img [ref=e30]
+            - button "Rename Project" [ref=e32] [cursor=pointer]:
+              - img [ref=e33]
+            - button "Delete Project" [ref=e35] [cursor=pointer]:
+              - img [ref=e36]
+        - heading "Screenshots" [level=2] [ref=e39]
+      - generic [ref=e40]:
+        - button "Add Screenshots" [ref=e41] [cursor=pointer]:
+          - img [ref=e42]
+          - text: Add Screenshots
+        - button "Blank Screen" [ref=e44] [cursor=pointer]:
+          - img [ref=e45]
+          - text: Blank Screen
+      - generic [ref=e48]:
+        - generic [ref=e49]:
+          - button "iPhone 6.9\" 1320 × 2868" [ref=e51] [cursor=pointer]:
+            - generic [ref=e52]:
+              - generic [ref=e53]: iPhone 6.9"
+              - generic [ref=e54]: 1320 × 2868
+            - img [ref=e55]
+          - button "Export current screenshot" [disabled]:
+            - img
+        - button "Export All" [disabled]:
+          - img
+          - text: Export All
+    - generic [ref=e59]:
+      - generic:
+        - img
+        - paragraph: Upload screenshots to get started
+    - generic:
+      - generic:
+        - generic:
+          - button "Background":
+            - img
+            - generic: Background
+          - button "Device":
+            - img
+            - generic: Device
+          - button "Text":
+            - img
+            - generic: Text
+          - button "Elements":
+            - img
+            - generic: Elements
+          - button "Popouts":
+            - img
+            - generic: Popouts
+      - generic:
+        - generic:
+          - generic:
+            - generic: Background Type
+            - generic:
+              - button "Gradient"
+              - button "Solid"
+              - button "Image"
+          - generic:
+            - generic:
+              - generic:
+                - button "Gradient Presets":
+                  - generic: Gradient Presets
+                  - img
+            - generic:
+              - generic: Gradient Direction
+              - generic:
+                - slider: "135"
+                - generic: 135°
+                - button "Reset to default":
+                  - img
+            - generic:
+              - generic: Colors
+              - generic:
+                - generic:
+                  - textbox: "#667eea"
+                  - spinbutton: "0"
+                  - generic: "%"
+                - generic:
+                  - textbox: "#764ba2"
+                  - spinbutton: "100"
+                  - generic: "%"
+              - button "+ Add Color Stop"
+          - generic:
+            - generic:
+              - generic:
+                - img
+                - text: Noise
+  - option "🇺🇸 English (US)" [selected]
+  - option "Add a language..." [selected]

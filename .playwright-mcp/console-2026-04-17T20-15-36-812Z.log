@@ -1,0 +1,16 @@
+[      51ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[      51ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[      51ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[      53ms] [ERROR] Initialization error: TypeError: Cannot read properties of undefined (reading 'charAt')
+    at http://localhost:8000/app.js:2249:40
+    at NodeList.forEach (<anonymous>)
+    at syncUIWithState (http://localhost:8000/app.js:2247:57)
+    at init (http://localhost:8000/app.js:1467:9) @ http://localhost:8000/app.js:1469
+[      54ms] TypeError: Cannot read properties of undefined (reading 'charAt')
+    at http://localhost:8000/app.js:2249:40
+    at NodeList.forEach (<anonymous>)
+    at syncUIWithState (http://localhost:8000/app.js:2247:57)
+    at init (http://localhost:8000/app.js:1472:9)
+[   15631ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[   15631ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[   15631ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0

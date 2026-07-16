@@ -1,0 +1,104 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]:
+          - heading "Project" [level=2] [ref=e6]
+          - generic [ref=e7]:
+            - button "🇺🇸" [ref=e9] [cursor=pointer]:
+              - generic [ref=e10]: 🇺🇸
+            - button "Magical Titles - AI-generated headlines" [ref=e11] [cursor=pointer]:
+              - img [ref=e12]
+            - button "About" [ref=e14] [cursor=pointer]:
+              - img "About" [ref=e15]
+            - button "Settings" [ref=e16] [cursor=pointer]:
+              - img [ref=e17]
+        - generic [ref=e20]:
+          - button "Default Project 0 screenshots" [ref=e22] [cursor=pointer]:
+            - generic [ref=e23]:
+              - generic [ref=e24]: Default Project
+              - generic [ref=e25]: 0 screenshots
+            - img [ref=e26]
+          - generic [ref=e28]:
+            - button "New Project" [ref=e29] [cursor=pointer]:
+              - img [ref=e30]
+            - button "Rename Project" [ref=e32] [cursor=pointer]:
+              - img [ref=e33]
+            - button "Delete Project" [ref=e35] [cursor=pointer]:
+              - img [ref=e36]
+        - heading "Screenshots" [level=2] [ref=e39]
+      - generic [ref=e40]:
+        - button "Add Screenshots" [ref=e41] [cursor=pointer]:
+          - img [ref=e42]
+          - text: Add Screenshots
+        - button "Blank Screen" [ref=e44] [cursor=pointer]:
+          - img [ref=e45]
+          - text: Blank Screen
+      - generic [ref=e48]:
+        - generic [ref=e49]:
+          - button "iPhone 6.9\" 1320 × 2868" [ref=e51] [cursor=pointer]:
+            - generic [ref=e52]:
+              - generic [ref=e53]: iPhone 6.9"
+              - generic [ref=e54]: 1320 × 2868
+            - img [ref=e55]
+          - button "Export current screenshot" [ref=e57] [cursor=pointer]:
+            - img [ref=e58]
+        - button "Export All" [ref=e60] [cursor=pointer]:
+          - img [ref=e61]
+          - text: Export All
+    - generic [ref=e65]:
+      - generic:
+        - img
+        - paragraph: Upload screenshots to get started
+    - generic [ref=e67]:
+      - generic [ref=e69]:
+        - button "Background" [ref=e70] [cursor=pointer]:
+          - img [ref=e71]
+          - generic [ref=e75]: Background
+        - button "Device" [ref=e76] [cursor=pointer]:
+          - img [ref=e77]
+          - generic [ref=e79]: Device
+        - button "Text" [ref=e80] [cursor=pointer]:
+          - img [ref=e81]
+          - generic [ref=e83]: Text
+        - button "Elements" [ref=e84] [cursor=pointer]:
+          - img [ref=e85]
+          - generic [ref=e90]: Elements
+        - button "Popouts" [ref=e91] [cursor=pointer]:
+          - img [ref=e92]
+          - generic [ref=e95]: Popouts
+      - generic [ref=e97]:
+        - generic [ref=e98]:
+          - generic [ref=e99]: Background Type
+          - generic [ref=e100]:
+            - button "Gradient" [ref=e101] [cursor=pointer]
+            - button "Solid" [ref=e102] [cursor=pointer]
+            - button "Image" [ref=e103] [cursor=pointer]
+        - generic [ref=e104]:
+          - button "Gradient Presets" [ref=e107] [cursor=pointer]:
+            - generic [ref=e108]: Gradient Presets
+            - img [ref=e109]
+          - generic [ref=e111]:
+            - generic [ref=e112]: Gradient Direction
+            - generic [ref=e113]:
+              - slider [ref=e114] [cursor=pointer]: "135"
+              - generic [ref=e115]: 135°
+              - button "Reset to default" [ref=e116] [cursor=pointer]:
+                - img [ref=e117]
+          - generic [ref=e120]:
+            - generic [ref=e121]: Colors
+            - generic [ref=e122]:
+              - generic [ref=e123]:
+                - textbox [ref=e124] [cursor=pointer]: "#667eea"
+                - spinbutton [ref=e125]: "0"
+                - generic [ref=e126]: "%"
+              - generic [ref=e127]:
+                - textbox [ref=e128] [cursor=pointer]: "#764ba2"
+                - spinbutton [ref=e129]: "100"
+                - generic [ref=e130]: "%"
+            - button "+ Add Color Stop" [ref=e131] [cursor=pointer]
+        - generic [ref=e135] [cursor=pointer]:
+          - img [ref=e136]
+          - text: Noise
+  - option "🇺🇸 English (US)" [selected]
+  - option "Add a language..." [selected]

@@ -1,0 +1,8 @@
+[      87ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[      87ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[      87ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8000/:0
+[      93ms] TypeError: Cannot read properties of undefined (reading 'charAt')
+    at http://localhost:8000/app.js:2321:43
+    at NodeList.forEach (<anonymous>)
+    at syncUIWithState (http://localhost:8000/app.js:2319:60)
+    at request.onsuccess (http://localhost:8000/app.js:1814:25)

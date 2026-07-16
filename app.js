@@ -21,6 +21,7 @@ const state = {
             },
             solid: '#1a1a2e',
             image: null,
+            imageSrc: null,
             imageFit: 'cover',
             imageBlur: 0,
             overlayColor: '#000000',
@@ -65,6 +66,13 @@ const state = {
             headlineUnderline: false,
             headlineStrikethrough: false,
             headlineColor: '#ffffff',
+            headlineGradient: false,
+            headlineGradientColor: '#10B981',
+            headlineGradientAngle: 90,
+            headlineGradientStops: [
+                { color: '#ffffff', position: 0 },
+                { color: '#10B981', position: 100 }
+            ],
             perLanguageLayout: false,
             languageSettings: {
                 en: {
@@ -90,7 +98,13 @@ const state = {
             subheadlineUnderline: false,
             subheadlineStrikethrough: false,
             subheadlineColor: '#ffffff',
-            subheadlineOpacity: 70
+            subheadlineOpacity: 70,
+            subheadlineGradient: false,
+            subheadlineGradientAngle: 90,
+            subheadlineGradientStops: [
+                { color: '#ffffff', position: 0 },
+                { color: '#10B981', position: 100 }
+            ]
         },
         elements: [],
         popouts: []
@@ -103,6 +117,89 @@ const baseTextDefaults = JSON.parse(JSON.stringify(state.defaults.text));
 let selectedElementId = null;
 let selectedPopoutId = null;
 let draggingElement = null;
+let templateUndoSnapshot = null;
+
+function captureTemplateSnapshot() {
+    const screenshot = getCurrentScreenshot();
+    if (!screenshot) return;
+    templateUndoSnapshot = {
+        index: state.selectedIndex,
+        background: cloneBackground(screenshot.background),
+        screenshot: JSON.parse(JSON.stringify(screenshot.screenshot)),
+        text: JSON.parse(JSON.stringify(screenshot.text)),
+        elements: JSON.parse(JSON.stringify((screenshot.elements || []).map(el => ({ ...el, image: undefined })))),
+        devices: JSON.parse(JSON.stringify(screenshot.devices || []))
+    };
+    const button = document.getElementById('undo-template-btn');
+    if (button) button.disabled = false;
+}
+
+function undoLastTemplate() {
+    if (!templateUndoSnapshot) return;
+    const screenshot = state.screenshots[templateUndoSnapshot.index];
+    if (!screenshot) return;
+    screenshot.background = cloneBackground(templateUndoSnapshot.background);
+    screenshot.screenshot = templateUndoSnapshot.screenshot;
+    screenshot.text = templateUndoSnapshot.text;
+    screenshot.elements = templateUndoSnapshot.elements;
+    screenshot.devices = templateUndoSnapshot.devices;
+    state.selectedIndex = templateUndoSnapshot.index;
+    templateUndoSnapshot = null;
+    document.getElementById('undo-template-btn').disabled = true;
+    syncUIWithState(); updateElementsList(); updateCanvas();
+}
+
+function templateShapeToElement(shape) {
+    return { id: crypto.randomUUID(), name: shape.type === 'ellipse' ? 'Ellipse' : 'Rectangle',
+        type: 'shape', shapeType: shape.type, x: shape.x, y: shape.y, width: shape.width,
+        height: shape.height, rotation: shape.rotation || 0, opacity: shape.opacity ?? 100,
+        fill: shape.fill, cornerRadius: shape.cornerRadius || 0, layer: shape.layer || 'behind-screenshot' };
+}
+
+function applyTemplate(templateId, mode = 'all') {
+    const screenshot = getCurrentScreenshot();
+    const template = typeof APP_TEMPLATES !== 'undefined' && APP_TEMPLATES.find(item => item.id === templateId);
+    if (!screenshot || !template) return;
+    captureTemplateSnapshot();
+    if (mode !== 'layout') screenshot.background = { ...cloneBackground(screenshot.background), ...JSON.parse(JSON.stringify(template.background)) };
+    const existingNonTemplateElements = (screenshot.elements || []).filter(el => !el.templateElement);
+    screenshot.elements = existingNonTemplateElements.concat((template.shapes || []).map(shape => ({ ...templateShapeToElement(shape), templateElement: true })));
+    screenshot.devices = JSON.parse(JSON.stringify(template.devices || []));
+    if (template.devices?.[0]) Object.assign(screenshot.screenshot, template.devices[0]);
+    const preservedHeadlines = screenshot.text.headlines;
+    const preservedSubheadlines = screenshot.text.subheadlines;
+    Object.assign(screenshot.text, JSON.parse(JSON.stringify(template.text || {})));
+    if (mode !== 'replace') {
+        screenshot.text.headlines = preservedHeadlines;
+        screenshot.text.subheadlines = preservedSubheadlines;
+    }
+    closeTemplateGallery(); syncUIWithState(); updateElementsList(); updateCanvas();
+}
+
+function closeTemplateGallery() { document.getElementById('template-gallery-overlay')?.remove(); }
+
+function renderTemplateThumbnail(template, element) {
+    const c = document.createElement('canvas'); c.width = 270; c.height = 480; const cctx = c.getContext('2d');
+    drawBackgroundToContext(cctx, { width: c.width, height: c.height }, template.background);
+    drawElementsToContext(cctx, { width: c.width, height: c.height }, (template.shapes || []).map(templateShapeToElement), 'behind-screenshot');
+    (template.devices || []).forEach(device => { const w = c.width * (device.scale / 100) * .48, h = w * 2.08;
+        cctx.save(); cctx.translate(c.width * device.x / 100, c.height * device.y / 100); cctx.rotate((device.rotation || 0) * Math.PI / 180);
+        cctx.shadowColor='#0006'; cctx.shadowBlur=12; cctx.fillStyle='#141419'; cctx.beginPath(); cctx.roundRect(-w/2,-h/2,w,h,14); cctx.fill();
+        cctx.shadowColor='transparent'; cctx.fillStyle='#f8f8fb'; cctx.beginPath(); cctx.roundRect(-w/2+5,-h/2+5,w-10,h-10,10); cctx.fill(); cctx.restore(); });
+    element.style.backgroundImage = `url(${c.toDataURL('image/png')})`; element.classList.add('is-rendered');
+}
+
+function openTemplateGallery() {
+    closeTemplateGallery();
+    const overlay = document.createElement('div');
+    overlay.id = 'template-gallery-overlay'; overlay.className = 'modal-overlay visible';
+    overlay.innerHTML = `<div class="modal template-gallery"><div class="template-gallery-header"><div><h2>Choose a template</h2><p>Keep your screenshot and copy while applying a complete art direction.</p></div><button class="modal-close" data-close>&times;</button></div><div class="template-mode" role="group" aria-label="Application mode"><label><input type="radio" name="template-mode" value="all" checked> Colors + layout</label><label><input type="radio" name="template-mode" value="layout"> Layout only</label><label><input type="radio" name="template-mode" value="replace"> Replace everything</label></div><div class="template-grid">${APP_TEMPLATES.map(t => `<button class="template-card" data-template="${t.id}"><span class="template-preview" style="--c1:${t.palette[0]};--c2:${t.palette[1]};--ink:${t.palette[2]}"><i></i><b></b><em></em></span><strong>${t.name}</strong><small>${t.category}</small></button>`).join('')}</div></div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelectorAll('[data-template]').forEach(card => renderTemplateThumbnail(APP_TEMPLATES.find(t => t.id === card.dataset.template), card.querySelector('.template-preview')));
+    overlay.querySelector('[data-close]').onclick = closeTemplateGallery;
+    overlay.onclick = e => { if (e.target === overlay) closeTemplateGallery(); };
+    overlay.querySelectorAll('[data-template]').forEach(card => card.onclick = () => applyTemplate(card.dataset.template, overlay.querySelector('[name="template-mode"]:checked').value));
+}
 
 // Preload laurel SVG images for element frames
 const laurelImages = {};
@@ -191,6 +288,28 @@ function normalizeTextSettings(text) {
     merged.subheadlines = merged.subheadlines || { en: '' };
     merged.subheadlineLanguages = merged.subheadlineLanguages || ['en'];
     merged.currentSubheadlineLang = merged.currentSubheadlineLang || merged.subheadlineLanguages[0] || 'en';
+
+    // Migrate old 2-color headline gradient to multi-stop format
+    if (merged.headlineGradient && merged.headlineGradientColor && !merged.headlineGradientStops) {
+        merged.headlineGradientStops = [
+            { color: merged.headlineColor || '#ffffff', position: 0 },
+            { color: merged.headlineGradientColor, position: 100 }
+        ];
+    }
+    if (!merged.headlineGradientStops) {
+        merged.headlineGradientStops = [
+            { color: '#ffffff', position: 0 },
+            { color: '#10B981', position: 100 }
+        ];
+    }
+    if (typeof merged.headlineGradientAngle === 'undefined') merged.headlineGradientAngle = 90;
+    if (!merged.subheadlineGradientStops) {
+        merged.subheadlineGradientStops = [
+            { color: '#ffffff', position: 0 },
+            { color: '#10B981', position: 100 }
+        ];
+    }
+    if (typeof merged.subheadlineGradientAngle === 'undefined') merged.subheadlineGradientAngle = 90;
 
     if (!merged.languageSettings) merged.languageSettings = {};
     const languages = new Set([...merged.headlineLanguages, ...merged.subheadlineLanguages]);
@@ -373,6 +492,16 @@ function addTextElement() {
     updateElementProperties();
 }
 
+function addShapeElement(shapeType) {
+    const screenshot = getCurrentScreenshot(); if (!screenshot) return;
+    if (!screenshot.elements) screenshot.elements = [];
+    const el = templateShapeToElement({ type: shapeType === 'rounded-rectangle' ? 'rectangle' : shapeType,
+        x: 50, y: 50, width: 42, height: 22, fill: '#5144F5', opacity: 100,
+        cornerRadius: shapeType === 'rounded-rectangle' ? 48 : 0, layer: 'behind-screenshot' });
+    el.name = shapeType === 'ellipse' ? 'Ellipse' : shapeType === 'rounded-rectangle' ? 'Rounded Rectangle' : 'Rectangle';
+    screenshot.elements.push(el); selectedElementId = el.id; updateCanvas(); updateElementsList(); updateElementProperties();
+}
+
 // ===== Lucide SVG loading & caching =====
 const lucideSVGCache = new Map(); // name -> raw SVG text
 
@@ -540,6 +669,44 @@ function formatValue(num) {
     return Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(1);
 }
 
+function serializeBackground(background) {
+    const serialized = JSON.parse(JSON.stringify({
+        ...background,
+        image: null,
+        imageSrc: background?.image?.src || background?.imageSrc || null
+    }));
+    serialized.image = null;
+    return serialized;
+}
+
+function hydrateBackground(background) {
+    const hydrated = JSON.parse(JSON.stringify(background || state.defaults.background));
+    hydrated.imageSrc = hydrated.imageSrc || null;
+    hydrated.image = null;
+
+    if (hydrated.imageSrc) {
+        const img = new Image();
+        img.onload = () => updateCanvas();
+        img.src = hydrated.imageSrc;
+        hydrated.image = img;
+    }
+
+    return hydrated;
+}
+
+function cloneBackground(background) {
+    const cloned = serializeBackground(background);
+    if (background?.image) {
+        cloned.image = background.image;
+    } else if (cloned.imageSrc) {
+        const img = new Image();
+        img.onload = () => updateCanvas();
+        img.src = cloned.imageSrc;
+        cloned.image = img;
+    }
+    return cloned;
+}
+
 function setBackground(key, value) {
     const screenshot = getCurrentScreenshot();
     if (screenshot) {
@@ -582,7 +749,7 @@ function setTextSetting(key, value) {
 function setCurrentScreenshotAsDefault() {
     const screenshot = getCurrentScreenshot();
     if (screenshot) {
-        state.defaults.background = JSON.parse(JSON.stringify(screenshot.background));
+        state.defaults.background = cloneBackground(screenshot.background);
         state.defaults.screenshot = JSON.parse(JSON.stringify(screenshot.screenshot));
         state.defaults.text = JSON.parse(JSON.stringify(screenshot.text));
     }
@@ -719,7 +886,7 @@ async function fetchAllGoogleFonts() {
         if (apiKey) {
             url.searchParams.set('key', apiKey);
         }
-        
+
         try {
             const response = await fetch(url);
             if (response.ok) {
@@ -1510,7 +1677,7 @@ function saveState() {
             name: s.name,
             deviceType: s.deviceType,
             localizedImages: localizedImages,
-            background: s.background,
+            background: serializeBackground(s.background),
             screenshot: s.screenshot,
             text: s.text,
             elements: (s.elements || []).map(el => ({
@@ -1518,6 +1685,7 @@ function saveState() {
                 image: undefined // Don't serialize Image objects
             })),
             popouts: s.popouts || [],
+            devices: s.devices || [],
             overrides: s.overrides
         };
     });
@@ -1532,7 +1700,10 @@ function saveState() {
         customHeight: state.customHeight,
         currentLanguage: state.currentLanguage,
         projectLanguages: state.projectLanguages,
-        defaults: state.defaults
+        defaults: {
+            ...state.defaults,
+            background: serializeBackground(state.defaults.background)
+        }
     };
 
     // Update screenshot count in project metadata
@@ -1628,6 +1799,7 @@ function loadState() {
                                 gradient: parsed.background.gradient || state.defaults.background.gradient,
                                 solid: parsed.background.solid || state.defaults.background.solid,
                                 image: null,
+                                imageSrc: parsed.background.imageSrc || null,
                                 imageFit: parsed.background.imageFit || 'cover',
                                 imageBlur: parsed.background.imageBlur || 0,
                                 overlayColor: parsed.background.overlayColor || '#000000',
@@ -1663,7 +1835,7 @@ function loadState() {
                                     name: s.name || 'Blank Screen',
                                     deviceType: s.deviceType,
                                     localizedImages: {},
-                                    background: s.background || JSON.parse(JSON.stringify(migratedBackground)),
+                                    background: hydrateBackground(s.background || migratedBackground),
                                     screenshot: screenshotSettings,
                                     text: s.text || JSON.parse(JSON.stringify(migratedText)),
                                     elements: reconstructElementImages(s.elements),
@@ -1702,7 +1874,7 @@ function loadState() {
                                                     name: s.name,
                                                     deviceType: s.deviceType,
                                                     localizedImages: localizedImages,
-                                                    background: s.background || JSON.parse(JSON.stringify(migratedBackground)),
+                                                    background: hydrateBackground(s.background || migratedBackground),
                                                     screenshot: screenshotSettings,
                                                     text: s.text || JSON.parse(JSON.stringify(migratedText)),
                                                     elements: reconstructElementImages(s.elements),
@@ -1747,7 +1919,7 @@ function loadState() {
                                         name: s.name,
                                         deviceType: s.deviceType,
                                         localizedImages: localizedImages,
-                                        background: s.background || JSON.parse(JSON.stringify(migratedBackground)),
+                                        background: hydrateBackground(s.background || migratedBackground),
                                         screenshot: screenshotSettings,
                                         text: s.text || JSON.parse(JSON.stringify(migratedText)),
                                         elements: reconstructElementImages(s.elements),
@@ -1793,10 +1965,11 @@ function loadState() {
                     // Load defaults (new format) or use migrated settings
                     if (parsed.defaults) {
                         state.defaults = parsed.defaults;
+                        state.defaults.background = hydrateBackground(parsed.defaults.background);
                         // Ensure elements array exists (may be missing from older saves)
                         if (!state.defaults.elements) state.defaults.elements = [];
                     } else {
-                        state.defaults.background = migratedBackground;
+                        state.defaults.background = hydrateBackground(migratedBackground);
                         state.defaults.screenshot = migratedScreenshot;
                         state.defaults.text = migratedText;
                     }
@@ -1902,6 +2075,13 @@ function resetStateToDefaults() {
             headlineUnderline: false,
             headlineStrikethrough: false,
             headlineColor: '#ffffff',
+            headlineGradient: false,
+            headlineGradientColor: '#10B981',
+            headlineGradientAngle: 90,
+            headlineGradientStops: [
+                { color: '#ffffff', position: 0 },
+                { color: '#10B981', position: 100 }
+            ],
             perLanguageLayout: false,
             languageSettings: {
                 en: {
@@ -1927,7 +2107,13 @@ function resetStateToDefaults() {
             subheadlineUnderline: false,
             subheadlineStrikethrough: false,
             subheadlineColor: '#ffffff',
-            subheadlineOpacity: 70
+            subheadlineOpacity: 70,
+            subheadlineGradient: false,
+            subheadlineGradientAngle: 90,
+            subheadlineGradientStops: [
+                { color: '#ffffff', position: 0 },
+                { color: '#10B981', position: 100 }
+            ]
         }
     };
 }
@@ -2235,9 +2421,14 @@ function syncUIWithState() {
     updateFontPickerPreview();
     document.getElementById('headline-size').value = headlineLayout.headlineSize;
     document.getElementById('headline-color').value = txt.headlineColor;
+    document.getElementById('headline-gradient-toggle').classList.toggle('active', txt.headlineGradient || false);
+    document.getElementById('headline-gradient-options').style.display = txt.headlineGradient ? '' : 'none';
+    document.getElementById('headline-gradient-angle').value = txt.headlineGradientAngle || 90;
+    document.getElementById('headline-gradient-angle-value').textContent = formatValue(txt.headlineGradientAngle || 90) + '°';
+    if (txt.headlineGradient) updateTextGradientStopsUI('headline');
     document.getElementById('headline-weight').value = txt.headlineWeight;
     // Sync text style buttons
-    document.querySelectorAll('#headline-style button').forEach(btn => {
+    document.querySelectorAll('#headline-style button[data-style]').forEach(btn => {
         const style = btn.dataset.style;
         const key = 'headline' + style.charAt(0).toUpperCase() + style.slice(1);
         btn.classList.toggle('active', txt[key] || false);
@@ -2254,11 +2445,16 @@ function syncUIWithState() {
     document.getElementById('subheadline-font').value = txt.subheadlineFont || txt.headlineFont;
     document.getElementById('subheadline-size').value = subheadlineLayout.subheadlineSize;
     document.getElementById('subheadline-color').value = txt.subheadlineColor;
+    document.getElementById('subheadline-gradient-toggle').classList.toggle('active', txt.subheadlineGradient || false);
+    document.getElementById('subheadline-gradient-options').style.display = txt.subheadlineGradient ? '' : 'none';
+    document.getElementById('subheadline-gradient-angle').value = txt.subheadlineGradientAngle || 90;
+    document.getElementById('subheadline-gradient-angle-value').textContent = formatValue(txt.subheadlineGradientAngle || 90) + '°';
+    if (txt.subheadlineGradient) updateTextGradientStopsUI('subheadline');
     document.getElementById('subheadline-opacity').value = txt.subheadlineOpacity;
     document.getElementById('subheadline-opacity-value').textContent = formatValue(txt.subheadlineOpacity) + '%';
     document.getElementById('subheadline-weight').value = txt.subheadlineWeight || '400';
     // Sync subheadline style buttons
-    document.querySelectorAll('#subheadline-style button').forEach(btn => {
+    document.querySelectorAll('#subheadline-style button[data-style]').forEach(btn => {
         const style = btn.dataset.style;
         const key = 'subheadline' + style.charAt(0).toUpperCase() + style.slice(1);
         btn.classList.toggle('active', txt[key] || false);
@@ -2518,6 +2714,9 @@ function setupElementEventListeners() {
     if (addTextBtn) {
         addTextBtn.addEventListener('click', () => addTextElement());
     }
+    document.getElementById('add-rectangle-btn')?.addEventListener('click', () => addShapeElement('rectangle'));
+    document.getElementById('add-rounded-rectangle-btn')?.addEventListener('click', () => addShapeElement('rounded-rectangle'));
+    document.getElementById('add-ellipse-btn')?.addEventListener('click', () => addShapeElement('ellipse'));
 
     // Add Emoji button
     const addEmojiBtn = document.getElementById('add-emoji-btn');
@@ -3592,6 +3791,17 @@ function setupPopoutEventListeners() {
 }
 
 function setupEventListeners() {
+    document.getElementById('open-templates-btn')?.addEventListener('click', openTemplateGallery);
+    document.getElementById('undo-template-btn')?.addEventListener('click', undoLastTemplate);
+    const closeVisibleModalOverlays = () => {
+        document.querySelectorAll('.modal-overlay.visible').forEach((overlay) => {
+            overlay.classList.remove('visible');
+            if (!overlay.id) {
+                overlay.remove();
+            }
+        });
+    };
+
     // Collapsible toggle rows
     document.querySelectorAll('.toggle-row.collapsible').forEach(row => {
         row.addEventListener('click', (e) => {
@@ -3678,6 +3888,14 @@ function setupEventListeners() {
     document.addEventListener('click', (e) => {
         if (!projectDropdown.contains(e.target)) {
             projectDropdown.classList.remove('open');
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeVisibleModalOverlays();
+            projectDropdown.classList.remove('open');
+            document.getElementById('output-size-dropdown').classList.remove('open');
         }
     });
 
@@ -4210,6 +4428,7 @@ function setupEventListeners() {
                 const img = new Image();
                 img.onload = () => {
                     setBackground('image', img);
+                    setBackground('imageSrc', event.target.result);
                     document.getElementById('bg-image-preview').src = event.target.result;
                     document.getElementById('bg-image-preview').style.display = 'block';
                     updateCanvas();
@@ -4461,13 +4680,44 @@ function setupEventListeners() {
         updateCanvas();
     });
 
+    document.getElementById('headline-gradient-toggle').addEventListener('click', () => {
+        const text = getTextSettings();
+        const newValue = !text.headlineGradient;
+        setTextValue('headlineGradient', newValue);
+        const btn = document.getElementById('headline-gradient-toggle');
+        btn.classList.toggle('active', newValue);
+        document.getElementById('headline-gradient-options').style.display = newValue ? '' : 'none';
+        if (newValue) updateTextGradientStopsUI('headline');
+        updateCanvas();
+    });
+
+    document.getElementById('headline-gradient-angle').addEventListener('input', (e) => {
+        setTextValue('headlineGradientAngle', parseInt(e.target.value));
+        document.getElementById('headline-gradient-angle-value').textContent = formatValue(e.target.value) + '°';
+        updateCanvas();
+    });
+
+    document.getElementById('add-headline-gradient-stop').addEventListener('click', () => {
+        const text = getTextSettings();
+        if (!text.headlineGradientStops) text.headlineGradientStops = [
+            { color: '#ffffff', position: 0 }, { color: '#10B981', position: 100 }
+        ];
+        const lastStop = text.headlineGradientStops[text.headlineGradientStops.length - 1];
+        text.headlineGradientStops.push({
+            color: lastStop.color,
+            position: Math.min(lastStop.position + 20, 100)
+        });
+        updateTextGradientStopsUI('headline');
+        updateCanvas();
+    });
+
     document.getElementById('headline-weight').addEventListener('change', (e) => {
         setTextValue('headlineWeight', e.target.value);
         updateCanvas();
     });
 
     // Text style buttons (italic, underline, strikethrough)
-    document.querySelectorAll('#headline-style button').forEach(btn => {
+    document.querySelectorAll('#headline-style button[data-style]').forEach(btn => {
         btn.addEventListener('click', () => {
             const style = btn.dataset.style;
             const key = 'headline' + style.charAt(0).toUpperCase() + style.slice(1);
@@ -4519,6 +4769,37 @@ function setupEventListeners() {
         updateCanvas();
     });
 
+    document.getElementById('subheadline-gradient-toggle').addEventListener('click', () => {
+        const text = getTextSettings();
+        const newValue = !text.subheadlineGradient;
+        setTextValue('subheadlineGradient', newValue);
+        const btn = document.getElementById('subheadline-gradient-toggle');
+        btn.classList.toggle('active', newValue);
+        document.getElementById('subheadline-gradient-options').style.display = newValue ? '' : 'none';
+        if (newValue) updateTextGradientStopsUI('subheadline');
+        updateCanvas();
+    });
+
+    document.getElementById('subheadline-gradient-angle').addEventListener('input', (e) => {
+        setTextValue('subheadlineGradientAngle', parseInt(e.target.value));
+        document.getElementById('subheadline-gradient-angle-value').textContent = formatValue(e.target.value) + '°';
+        updateCanvas();
+    });
+
+    document.getElementById('add-subheadline-gradient-stop').addEventListener('click', () => {
+        const text = getTextSettings();
+        if (!text.subheadlineGradientStops) text.subheadlineGradientStops = [
+            { color: '#ffffff', position: 0 }, { color: '#10B981', position: 100 }
+        ];
+        const lastStop = text.subheadlineGradientStops[text.subheadlineGradientStops.length - 1];
+        text.subheadlineGradientStops.push({
+            color: lastStop.color,
+            position: Math.min(lastStop.position + 20, 100)
+        });
+        updateTextGradientStopsUI('subheadline');
+        updateCanvas();
+    });
+
     document.getElementById('subheadline-opacity').addEventListener('input', (e) => {
         const value = parseInt(e.target.value) || 70;
         setTextValue('subheadlineOpacity', value);
@@ -4533,7 +4814,7 @@ function setupEventListeners() {
     });
 
     // Subheadline style buttons (italic, underline, strikethrough)
-    document.querySelectorAll('#subheadline-style button').forEach(btn => {
+    document.querySelectorAll('#subheadline-style button[data-style]').forEach(btn => {
         btn.addEventListener('click', () => {
             const style = btn.dataset.style;
             const key = 'subheadline' + style.charAt(0).toUpperCase() + style.slice(1);
@@ -5883,9 +6164,14 @@ function updateTextUI(text) {
     updateFontPickerPreview();
     document.getElementById('headline-size').value = headlineLayout.headlineSize;
     document.getElementById('headline-color').value = text.headlineColor;
+    document.getElementById('headline-gradient-toggle').classList.toggle('active', text.headlineGradient || false);
+    document.getElementById('headline-gradient-options').style.display = text.headlineGradient ? '' : 'none';
+    document.getElementById('headline-gradient-angle').value = text.headlineGradientAngle || 90;
+    document.getElementById('headline-gradient-angle-value').textContent = formatValue(text.headlineGradientAngle || 90) + '°';
+    if (text.headlineGradient) updateTextGradientStopsUI('headline');
     document.getElementById('headline-weight').value = text.headlineWeight;
     // Sync text style buttons
-    document.querySelectorAll('#headline-style button').forEach(btn => {
+    document.querySelectorAll('#headline-style button[data-style]').forEach(btn => {
         const style = btn.dataset.style;
         const key = 'headline' + style.charAt(0).toUpperCase() + style.slice(1);
         btn.classList.toggle('active', text[key] || false);
@@ -5901,11 +6187,16 @@ function updateTextUI(text) {
     document.getElementById('subheadline-font').value = text.subheadlineFont || text.headlineFont;
     document.getElementById('subheadline-size').value = subheadlineLayout.subheadlineSize;
     document.getElementById('subheadline-color').value = text.subheadlineColor;
+    document.getElementById('subheadline-gradient-toggle').classList.toggle('active', text.subheadlineGradient || false);
+    document.getElementById('subheadline-gradient-options').style.display = text.subheadlineGradient ? '' : 'none';
+    document.getElementById('subheadline-gradient-angle').value = text.subheadlineGradientAngle || 90;
+    document.getElementById('subheadline-gradient-angle-value').textContent = formatValue(text.subheadlineGradientAngle || 90) + '°';
+    if (text.subheadlineGradient) updateTextGradientStopsUI('subheadline');
     document.getElementById('subheadline-opacity').value = text.subheadlineOpacity;
     document.getElementById('subheadline-opacity-value').textContent = formatValue(text.subheadlineOpacity) + '%';
     document.getElementById('subheadline-weight').value = text.subheadlineWeight || '400';
     // Sync subheadline style buttons
-    document.querySelectorAll('#subheadline-style button').forEach(btn => {
+    document.querySelectorAll('#subheadline-style button[data-style]').forEach(btn => {
         const style = btn.dataset.style;
         const key = 'subheadline' + style.charAt(0).toUpperCase() + style.slice(1);
         btn.classList.toggle('active', text[key] || false);
@@ -6115,6 +6406,20 @@ async function processImageFile(file) {
 }
 
 function createNewScreenshot(img, src, name, lang, deviceType) {
+    if (!img && !src) {
+        const demo = document.createElement('canvas'); demo.width = 1179; demo.height = 2556;
+        const d = demo.getContext('2d');
+        d.fillStyle = '#f8f8fb'; d.fillRect(0, 0, demo.width, demo.height);
+        d.fillStyle = '#111218'; d.font = '700 66px -apple-system, sans-serif'; d.fillText('MY LIBRARY', 74, 150);
+        d.fillStyle = '#777982'; d.font = '36px -apple-system, sans-serif'; d.fillText('Everything you saved, ready to listen', 74, 214);
+        d.fillStyle = '#5144F5'; d.beginPath(); d.roundRect(70, 270, 180, 76, 38); d.fill();
+        d.fillStyle = '#ffffff'; d.font = '600 30px -apple-system, sans-serif'; d.fillText('All', 142, 320);
+        const colors = ['#dbe9ff','#e8dcff','#d8f5e8','#ffe5d5','#fff2bd'];
+        for (let i=0;i<5;i++) { const y=405+i*330; d.fillStyle='#ffffff'; d.beginPath(); d.roundRect(60,y,1059,270,34); d.fill(); d.fillStyle=colors[i]; d.beginPath(); d.roundRect(90,y+45,180,180,24); d.fill(); d.fillStyle='#1b1c22'; d.font='700 38px -apple-system, sans-serif'; d.fillText(['Atomic Habits','Designing Your Life','Deep Work','The Creative Act','Build Better Products'][i],310,y+98); d.fillStyle='#787a83'; d.font='31px -apple-system, sans-serif'; d.fillText('Audio summary · 12 min',310,y+155); d.fillStyle='#5144F5'; d.fillText('Play  →',310,y+211); }
+        d.fillStyle='#ffffff'; d.fillRect(0,2315,demo.width,241); d.fillStyle='#17171b'; d.font='31px -apple-system, sans-serif'; d.fillText('Home',100,2432); d.fillText('Library',470,2432); d.fillStyle='#5144F5'; d.beginPath(); d.arc(1015,2410,58,0,Math.PI*2); d.fill(); d.fillStyle='#fff'; d.font='60px sans-serif'; d.fillText('+',997,2431);
+        src = demo.toDataURL('image/png'); img = new Image(); img.src = src; name = name || 'Demo Library';
+        img.onload = () => updateCanvas();
+    }
     const localizedImages = {};
     if (img && src) {
         localizedImages[lang || 'en'] = {
@@ -6138,14 +6443,17 @@ function createNewScreenshot(img, src, name, lang, deviceType) {
         name: name || 'Blank Screen',
         deviceType: deviceType,
         localizedImages: localizedImages,
-        background: JSON.parse(JSON.stringify(state.defaults.background)),
+        background: cloneBackground(state.defaults.background),
         screenshot: JSON.parse(JSON.stringify(state.defaults.screenshot)),
         text: JSON.parse(JSON.stringify(textDefaults)),
         elements: JSON.parse(JSON.stringify(state.defaults.elements || [])),
         popouts: [],
+        devices: [],
         // Legacy overrides for backwards compatibility
         overrides: {}
     });
+
+    state.selectedIndex = state.screenshots.length - 1;
 
     updateScreenshotList();
     if (state.screenshots.length === 1) {
@@ -6522,11 +6830,7 @@ function transferStyle(sourceIndex, targetIndex) {
     }
 
     // Deep copy background settings
-    target.background = JSON.parse(JSON.stringify(source.background));
-    // Handle background image separately (not JSON serializable)
-    if (source.background.image) {
-        target.background.image = source.background.image;
-    }
+    target.background = cloneBackground(source.background);
 
     // Deep copy screenshot settings
     target.screenshot = JSON.parse(JSON.stringify(source.screenshot));
@@ -6585,11 +6889,7 @@ function applyStyleToAll() {
         if (index === applyStyleSourceIndex) return; // Skip source
 
         // Deep copy background settings
-        target.background = JSON.parse(JSON.stringify(source.background));
-        // Handle background image separately (not JSON serializable)
-        if (source.background.image) {
-            target.background.image = source.background.image;
-        }
+        target.background = cloneBackground(source.background);
 
         // Deep copy screenshot settings
         target.screenshot = JSON.parse(JSON.stringify(source.screenshot));
@@ -6731,6 +7031,60 @@ function updateGradientStopsUI() {
     });
 }
 
+function updateTextGradientStopsUI(prefix) {
+    // prefix: 'headline' or 'subheadline'
+    const containerId = prefix + '-gradient-stops';
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+
+    const text = getTextSettings();
+    const stopsKey = prefix + 'GradientStops';
+    const stops = text[stopsKey] || [
+        { color: '#ffffff', position: 0 },
+        { color: '#10B981', position: 100 }
+    ];
+
+    stops.forEach((stop, index) => {
+        const div = document.createElement('div');
+        div.className = 'gradient-stop';
+        div.innerHTML = `
+            <input type="color" value="${stop.color}" data-stop="${index}">
+            <input type="number" value="${stop.position}" min="0" max="100" data-stop="${index}">
+            <span>%</span>
+            ${index > 1 ? `<button class="screenshot-delete" data-stop="${index}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+            </button>` : ''}
+        `;
+
+        div.querySelector('input[type="color"]').addEventListener('input', (e) => {
+            const t = getTextSettings();
+            t[stopsKey][index].color = e.target.value;
+            updateCanvas();
+        });
+
+        div.querySelector('input[type="number"]').addEventListener('input', (e) => {
+            const t = getTextSettings();
+            t[stopsKey][index].position = parseInt(e.target.value);
+            updateCanvas();
+        });
+
+        const deleteBtn = div.querySelector('.screenshot-delete');
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', () => {
+                const t = getTextSettings();
+                t[stopsKey].splice(index, 1);
+                updateTextGradientStopsUI(prefix);
+                updateCanvas();
+            });
+        }
+
+        container.appendChild(div);
+    });
+}
+
 function getCanvasDimensions() {
     if (state.outputDevice === 'custom') {
         return { width: state.customWidth, height: state.customHeight };
@@ -6775,8 +7129,12 @@ function updateCanvas() {
             }
             renderThreeJSToCanvas(canvas, dims.width, dims.height);
         } else if (!use3D) {
-            // In 2D mode, draw the screenshot normally
-            drawScreenshot();
+            const devices = screenshot?.devices || [];
+            if (devices.length) devices.forEach(device => {
+                ctx.save(); ctx.globalAlpha = (device.opacity ?? 100) / 100;
+                drawScreenshotToContext(ctx, dims, img, { ...ss, ...device }); ctx.restore();
+            });
+            else drawScreenshot();
         }
     }
 
@@ -7022,8 +7380,12 @@ function renderScreenshotToCanvas(index, targetCanvas, targetCtx, dims, previewS
             // Render 3D phone model for this specific screenshot
             renderThreeJSForScreenshot(targetCanvas, dims.width, dims.height, index);
         } else {
-            // Draw 2D screenshot using localized image
-            drawScreenshotToContext(targetCtx, dims, img, settings);
+            const devices = screenshot.devices || [];
+            if (devices.length) devices.forEach(device => {
+                targetCtx.save(); targetCtx.globalAlpha = (device.opacity ?? 100) / 100;
+                drawScreenshotToContext(targetCtx, dims, img, { ...settings, ...device }); targetCtx.restore();
+            });
+            else drawScreenshotToContext(targetCtx, dims, img, settings);
         }
     }
 
@@ -7241,12 +7603,14 @@ function drawTextToContext(context, dims, txt) {
 
     if (!headline && !subheadline) return;
 
-    const padding = dims.width * 0.08;
+    const blockWidth = dims.width * ((txt.blockWidth || 84) / 100);
+    const blockX = dims.width * ((txt.blockX ?? 50) / 100);
+    const padding = (dims.width - blockWidth) / 2;
     const textY = layoutSettings.position === 'top'
         ? dims.height * (layoutSettings.offsetY / 100)
         : dims.height * (1 - layoutSettings.offsetY / 100);
 
-    context.textAlign = 'center';
+    context.textAlign = txt.align || 'center';
     context.textBaseline = layoutSettings.position === 'top' ? 'top' : 'bottom';
 
     let currentY = textY;
@@ -7255,9 +7619,26 @@ function drawTextToContext(context, dims, txt) {
     if (headline) {
         const fontStyle = txt.headlineItalic ? 'italic' : 'normal';
         context.font = `${fontStyle} ${txt.headlineWeight} ${headlineLayout.headlineSize}px ${txt.headlineFont}`;
-        context.fillStyle = txt.headlineColor;
+        if (txt.headlineGradient) {
+            const angle = (txt.headlineGradientAngle || 90) * Math.PI / 180;
+            const cx = dims.width / 2, cy = dims.height / 2;
+            const len = Math.max(dims.width, dims.height);
+            const x1 = cx - Math.cos(angle) * len / 2;
+            const y1 = cy - Math.sin(angle) * len / 2;
+            const x2 = cx + Math.cos(angle) * len / 2;
+            const y2 = cy + Math.sin(angle) * len / 2;
+            const grad = context.createLinearGradient(x1, y1, x2, y2);
+            const stops = txt.headlineGradientStops || [
+                { color: txt.headlineColor, position: 0 },
+                { color: txt.headlineGradientColor || '#10B981', position: 100 }
+            ];
+            stops.forEach(s => grad.addColorStop(Math.min(1, Math.max(0, s.position / 100)), s.color));
+            context.fillStyle = grad;
+        } else {
+            context.fillStyle = txt.headlineColor;
+        }
 
-        const lines = wrapText(context, headline, dims.width - padding * 2);
+        const lines = wrapText(context, headline, blockWidth);
         const lineHeight = headlineLayout.headlineSize * (layoutSettings.lineHeight / 100);
 
         // For bottom positioning, offset currentY so lines draw correctly
@@ -7269,7 +7650,8 @@ function drawTextToContext(context, dims, txt) {
         lines.forEach((line, i) => {
             const y = currentY + i * lineHeight;
             lastLineY = y;
-            context.fillText(line, dims.width / 2, y);
+            const textX = txt.align === 'left' ? blockX - blockWidth / 2 : txt.align === 'right' ? blockX + blockWidth / 2 : blockX;
+            context.fillText(line, textX, y);
 
             // Calculate text metrics for decorations
             const textWidth = context.measureText(line).width;
@@ -7312,9 +7694,27 @@ function drawTextToContext(context, dims, txt) {
         const subFontStyle = txt.subheadlineItalic ? 'italic' : 'normal';
         const subWeight = txt.subheadlineWeight || '400';
         context.font = `${subFontStyle} ${subWeight} ${subheadlineLayout.subheadlineSize}px ${txt.subheadlineFont || txt.headlineFont}`;
-        context.fillStyle = hexToRgba(txt.subheadlineColor, txt.subheadlineOpacity / 100);
+        if (txt.subheadlineGradient) {
+            const angle = (txt.subheadlineGradientAngle || 90) * Math.PI / 180;
+            const cx = dims.width / 2, cy = dims.height / 2;
+            const len = Math.max(dims.width, dims.height);
+            const x1 = cx - Math.cos(angle) * len / 2;
+            const y1 = cy - Math.sin(angle) * len / 2;
+            const x2 = cx + Math.cos(angle) * len / 2;
+            const y2 = cy + Math.sin(angle) * len / 2;
+            const grad = context.createLinearGradient(x1, y1, x2, y2);
+            const stops = txt.subheadlineGradientStops || [
+                { color: '#ffffff', position: 0 },
+                { color: '#10B981', position: 100 }
+            ];
+            const opacity = txt.subheadlineOpacity / 100;
+            stops.forEach(s => grad.addColorStop(Math.min(1, Math.max(0, s.position / 100)), hexToRgba(s.color, opacity)));
+            context.fillStyle = grad;
+        } else {
+            context.fillStyle = hexToRgba(txt.subheadlineColor, txt.subheadlineOpacity / 100);
+        }
 
-        const lines = wrapText(context, subheadline, dims.width - padding * 2);
+        const lines = wrapText(context, subheadline, blockWidth);
         const subLineHeight = subheadlineLayout.subheadlineSize * 1.4;
 
         // Subheadline starts after headline with gap determined by headline lineHeight
@@ -7326,7 +7726,8 @@ function drawTextToContext(context, dims, txt) {
 
         lines.forEach((line, i) => {
             const y = subY + i * subLineHeight;
-            context.fillText(line, dims.width / 2, y);
+            const textX = txt.align === 'left' ? blockX - blockWidth / 2 : txt.align === 'right' ? blockX + blockWidth / 2 : blockX;
+            context.fillText(line, textX, y);
 
             // Calculate text metrics for decorations
             const textWidth = context.measureText(line).width;
@@ -7376,7 +7777,17 @@ function drawElementsToContext(context, dims, elements, layer) {
             context.rotate(el.rotation * Math.PI / 180);
         }
 
-        if (el.type === 'emoji' && el.emoji) {
+        if (el.type === 'shape') {
+            const elHeight = dims.height * ((el.height ?? el.width) / 100);
+            context.fillStyle = el.fill || '#ffffff';
+            context.beginPath();
+            if (el.shapeType === 'ellipse') {
+                context.ellipse(0, 0, elWidth / 2, elHeight / 2, 0, 0, Math.PI * 2);
+            } else {
+                context.roundRect(-elWidth / 2, -elHeight / 2, elWidth, elHeight, el.cornerRadius || 0);
+            }
+            context.fill();
+        } else if (el.type === 'emoji' && el.emoji) {
             const emojiSize = elWidth * 0.85;
             context.font = `${emojiSize}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
             context.textAlign = 'center';
@@ -7387,9 +7798,9 @@ function drawElementsToContext(context, dims, elements, layer) {
             if (el.iconShadow?.enabled) {
                 const s = el.iconShadow;
                 const hex = s.color || '#000000';
-                const r = parseInt(hex.slice(1,3), 16);
-                const g = parseInt(hex.slice(3,5), 16);
-                const b = parseInt(hex.slice(5,7), 16);
+                const r = parseInt(hex.slice(1, 3), 16);
+                const g = parseInt(hex.slice(3, 5), 16);
+                const b = parseInt(hex.slice(5, 7), 16);
                 context.shadowColor = `rgba(${r},${g},${b},${(s.opacity || 0) / 100})`;
                 context.shadowBlur = s.blur || 0;
                 context.shadowOffsetX = s.x || 0;
@@ -7816,6 +8227,8 @@ function drawDeviceFrame(x, y, width, height) {
 }
 
 function drawText() {
+    drawTextToContext(ctx, getCanvasDimensions(), getText());
+    return;
     const dims = getCanvasDimensions();
     const text = getTextSettings();
 
@@ -7850,7 +8263,24 @@ function drawText() {
     if (headline) {
         const fontStyle = text.headlineItalic ? 'italic' : 'normal';
         ctx.font = `${fontStyle} ${text.headlineWeight} ${headlineLayout.headlineSize}px ${text.headlineFont}`;
-        ctx.fillStyle = text.headlineColor;
+        if (text.headlineGradient) {
+            const angle = (text.headlineGradientAngle || 90) * Math.PI / 180;
+            const cx = dims.width / 2, cy = dims.height / 2;
+            const len = Math.max(dims.width, dims.height);
+            const x1 = cx - Math.cos(angle) * len / 2;
+            const y1 = cy - Math.sin(angle) * len / 2;
+            const x2 = cx + Math.cos(angle) * len / 2;
+            const y2 = cy + Math.sin(angle) * len / 2;
+            const grad = ctx.createLinearGradient(x1, y1, x2, y2);
+            const stops = text.headlineGradientStops || [
+                { color: text.headlineColor, position: 0 },
+                { color: text.headlineGradientColor || '#10B981', position: 100 }
+            ];
+            stops.forEach(s => grad.addColorStop(Math.min(1, Math.max(0, s.position / 100)), s.color));
+            ctx.fillStyle = grad;
+        } else {
+            ctx.fillStyle = text.headlineColor;
+        }
 
         const lines = wrapText(ctx, headline, dims.width - padding * 2);
         const lineHeight = headlineLayout.headlineSize * (layoutSettings.lineHeight / 100);
@@ -7907,7 +8337,25 @@ function drawText() {
         const subFontStyle = text.subheadlineItalic ? 'italic' : 'normal';
         const subWeight = text.subheadlineWeight || '400';
         ctx.font = `${subFontStyle} ${subWeight} ${subheadlineLayout.subheadlineSize}px ${text.subheadlineFont || text.headlineFont}`;
-        ctx.fillStyle = hexToRgba(text.subheadlineColor, text.subheadlineOpacity / 100);
+        if (text.subheadlineGradient) {
+            const angle = (text.subheadlineGradientAngle || 90) * Math.PI / 180;
+            const cx = dims.width / 2, cy = dims.height / 2;
+            const len = Math.max(dims.width, dims.height);
+            const x1 = cx - Math.cos(angle) * len / 2;
+            const y1 = cy - Math.sin(angle) * len / 2;
+            const x2 = cx + Math.cos(angle) * len / 2;
+            const y2 = cy + Math.sin(angle) * len / 2;
+            const grad = ctx.createLinearGradient(x1, y1, x2, y2);
+            const stops = text.subheadlineGradientStops || [
+                { color: '#ffffff', position: 0 },
+                { color: '#10B981', position: 100 }
+            ];
+            const opacity = text.subheadlineOpacity / 100;
+            stops.forEach(s => grad.addColorStop(Math.min(1, Math.max(0, s.position / 100)), hexToRgba(s.color, opacity)));
+            ctx.fillStyle = grad;
+        } else {
+            ctx.fillStyle = hexToRgba(text.subheadlineColor, text.subheadlineOpacity / 100);
+        }
 
         const lines = wrapText(ctx, subheadline, dims.width - padding * 2);
         const subLineHeight = subheadlineLayout.subheadlineSize * 1.4;
@@ -8416,7 +8864,7 @@ function renderIconGrid(category) {
     const grid = document.getElementById('icon-grid');
     if (!grid) return;
     const icons = category === 'popular' ? (typeof LUCIDE_POPULAR !== 'undefined' ? LUCIDE_POPULAR : []) :
-                                            (typeof LUCIDE_ALL !== 'undefined' ? LUCIDE_ALL : []);
+        (typeof LUCIDE_ALL !== 'undefined' ? LUCIDE_ALL : []);
     grid.innerHTML = icons.map(name =>
         `<div class="picker-grid-item icon-grid-item" data-icon-name="${name}" title="${name}"><div class="icon-placeholder"></div></div>`
     ).join('');
