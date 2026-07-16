@@ -17,6 +17,9 @@ COPY three-renderer.js /usr/share/nginx/html/
 COPY language-utils.js /usr/share/nginx/html/
 COPY magical-titles.js /usr/share/nginx/html/
 COPY llm.js /usr/share/nginx/html/
+COPY ai-image-gen.js /usr/share/nginx/html/
+COPY lucide-icons.js /usr/share/nginx/html/
+COPY templates.js /usr/share/nginx/html/
 
 # Copy assets
 COPY models/ /usr/share/nginx/html/models/
