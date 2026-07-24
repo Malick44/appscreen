@@ -4186,6 +4186,21 @@ function setupEventListeners() {
         openTranslateModal('subheadline');
     });
 
+    document.getElementById('generate-headline-btn').addEventListener('click', () => {
+        openAiTextModal('headline');
+    });
+
+    document.getElementById('generate-subheadline-btn').addEventListener('click', () => {
+        openAiTextModal('subheadline');
+    });
+
+    document.getElementById('ai-text-close').addEventListener('click', closeAiTextModal);
+    document.getElementById('ai-text-cancel').addEventListener('click', closeAiTextModal);
+    document.getElementById('ai-text-generate').addEventListener('click', generateAiTextSuggestions);
+    document.getElementById('ai-text-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'ai-text-modal') closeAiTextModal();
+    });
+
     document.getElementById('translate-element-btn').addEventListener('click', () => {
         openTranslateModal('element');
     });
@@ -5287,6 +5302,172 @@ const languageNames = {
     'da': 'Danish', 'no': 'Norwegian', 'fi': 'Finnish', 'th': 'Thai',
     'vi': 'Vietnamese', 'id': 'Indonesian', 'uk': 'Ukrainian'
 };
+
+let currentAiTextTarget = 'headline';
+
+function openAiTextModal(target) {
+    const screenshot = getCurrentScreenshot();
+    if (!screenshot) {
+        showAppAlert('Add a screenshot before generating text with AI.', 'info');
+        return;
+    }
+
+    const provider = getSelectedProvider();
+    const providerConfig = llmProviders[provider];
+    const apiKey = localStorage.getItem(providerConfig.storageKey);
+    if (!apiKey) {
+        showAppAlert('Add your LLM API key in Settings to generate text with AI.', 'error');
+        return;
+    }
+
+    currentAiTextTarget = target;
+    document.getElementById('ai-text-target-label').textContent =
+        target === 'headline' ? 'Headline' : 'Subheadline';
+    document.getElementById('ai-text-status').textContent = `Using ${providerConfig.name}`;
+    document.getElementById('ai-text-status').className = 'ai-text-status';
+    document.getElementById('ai-text-suggestions').innerHTML = '';
+
+    const languageSelect = document.getElementById('ai-text-language');
+    languageSelect.innerHTML = state.projectLanguages.map(lang =>
+        `<option value="${lang}"${lang === state.currentLanguage ? ' selected' : ''}>${languageFlags[lang] || ''} ${languageNames[lang] || lang}</option>`
+    ).join('');
+
+    document.getElementById('ai-text-modal').classList.add('visible');
+}
+
+function closeAiTextModal() {
+    document.getElementById('ai-text-modal').classList.remove('visible');
+}
+
+function setAiTextStatus(message, type = '') {
+    const status = document.getElementById('ai-text-status');
+    status.textContent = message;
+    status.className = `ai-text-status${type ? ` ${type}` : ''}`;
+}
+
+function applyAiTextSuggestion(value, language) {
+    const text = getTextSettings();
+    if (currentAiTextTarget === 'headline') {
+        text.headlines[language] = value;
+        text.headlineEnabled = true;
+        text.currentHeadlineLang = language;
+        if (!text.headlineLanguages.includes(language)) text.headlineLanguages.push(language);
+    } else {
+        text.subheadlines[language] = value;
+        text.subheadlineEnabled = true;
+        text.currentSubheadlineLang = language;
+        if (!text.subheadlineLanguages.includes(language)) text.subheadlineLanguages.push(language);
+    }
+
+    state.currentLanguage = language;
+    syncUIWithState();
+    saveState();
+    updateCanvas();
+    closeAiTextModal();
+}
+
+async function generateAiTextSuggestions() {
+    const screenshot = getCurrentScreenshot();
+    const provider = getSelectedProvider();
+    const providerConfig = llmProviders[provider];
+    const apiKey = localStorage.getItem(providerConfig.storageKey);
+    const language = document.getElementById('ai-text-language').value || state.currentLanguage || 'en';
+    const languageName = languageNames[language] || language;
+    const tone = document.getElementById('ai-text-tone').value;
+    const instructions = document.getElementById('ai-text-instructions').value.trim();
+    const targetLabel = currentAiTextTarget === 'headline' ? 'headline' : 'subheadline';
+    const maxWords = currentAiTextTarget === 'headline' ? '2 to 5' : '4 to 9';
+    const dataUrl = getScreenshotDataUrl(screenshot, language);
+    const parsedImage = dataUrl ? parseDataUrl(dataUrl) : null;
+
+    if (window.location.protocol === 'file:') {
+        setAiTextStatus('AI generation requires the app to be opened through its web address, not directly from index.html.', 'error');
+        return;
+    }
+
+    if (!parsedImage) {
+        setAiTextStatus('The current screenshot image could not be read.', 'error');
+        return;
+    }
+
+    const existingText = getTextSettings();
+    const companionText = currentAiTextTarget === 'headline'
+        ? existingText.subheadlines?.[language]
+        : existingText.headlines?.[language];
+
+    const prompt = `You are an expert App Store marketing copywriter. Analyze the attached app screenshot and write 4 distinct ${targetLabel} options in ${languageName}.
+
+Requirements:
+- Each option must be ${maxWords} words.
+- Use a ${tone} tone.
+- Focus on the clearest user benefit or feature visible in the screenshot.
+- Keep the copy natural, specific, and easy to read at a glance.
+- Do not use quotation marks, emoji, unverifiable statistics, or repeated ideas.
+${companionText ? `- Make every option complement this existing ${currentAiTextTarget === 'headline' ? 'subheadline' : 'headline'}: "${companionText}".` : ''}
+${instructions ? `- Additional direction from the user: ${instructions}` : ''}
+
+Respond ONLY with valid JSON in this format:
+{"suggestions":["Option one","Option two","Option three","Option four"]}`;
+
+    const button = document.getElementById('ai-text-generate');
+    button.classList.add('loading');
+    button.disabled = true;
+    button.querySelector('span').textContent = 'Generating...';
+    document.getElementById('ai-text-suggestions').innerHTML = '';
+    setAiTextStatus(`Analyzing screenshot with ${providerConfig.name}...`);
+
+    try {
+        let responseText;
+        const images = [parsedImage];
+        if (provider === 'anthropic') {
+            responseText = await generateTitlesWithAnthropic(apiKey, images, prompt);
+        } else if (provider === 'openai') {
+            responseText = await generateTitlesWithOpenAI(apiKey, images, prompt);
+        } else if (provider === 'google') {
+            responseText = await generateTitlesWithGoogle(apiKey, images, prompt);
+        } else {
+            throw new Error(`Unknown provider: ${provider}`);
+        }
+
+        responseText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        const result = JSON.parse(jsonMatch ? jsonMatch[0] : responseText);
+        const suggestions = Array.isArray(result.suggestions)
+            ? result.suggestions.filter(item => typeof item === 'string' && item.trim()).slice(0, 4)
+            : [];
+
+        if (!suggestions.length) throw new Error('AI returned no usable suggestions.');
+
+        const container = document.getElementById('ai-text-suggestions');
+        suggestions.forEach(suggestion => {
+            const option = document.createElement('button');
+            option.type = 'button';
+            option.className = 'ai-text-suggestion';
+            option.textContent = suggestion.trim();
+            option.addEventListener('click', () => applyAiTextSuggestion(suggestion.trim(), language));
+            container.appendChild(option);
+        });
+        setAiTextStatus('Choose a suggestion to apply it.');
+    } catch (error) {
+        console.error('AI text generation error:', error);
+        if (error.message === 'AI_UNAVAILABLE' || /401|403/.test(error.message)) {
+            setAiTextStatus('The API key was rejected. Update it in Settings.', 'error');
+        } else if (error.message === 'Failed to fetch' || error instanceof TypeError) {
+            setAiTextStatus(
+                'Could not reach the AI provider. Open AppScreen through http://localhost:8000 or the deployed HTTPS site, then check your connection and provider key.',
+                'error'
+            );
+        } else if (error instanceof SyntaxError) {
+            setAiTextStatus('The AI response could not be read. Please try again.', 'error');
+        } else {
+            setAiTextStatus(`Generation failed: ${error.message}`, 'error');
+        }
+    } finally {
+        button.classList.remove('loading');
+        button.disabled = false;
+        button.querySelector('span').textContent = 'Generate suggestions';
+    }
+}
 
 function openTranslateModal(target) {
     currentTranslateTarget = target;

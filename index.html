@@ -946,13 +946,23 @@
                         <div class="control-group">
                             <div class="textarea-with-button">
                                 <textarea id="headline-text" rows="2" placeholder="Your feature headline"></textarea>
-                                <button class="magic-translate-btn" id="translate-headline-btn"
-                                    title="Translate to all languages">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                        stroke-width="2">
-                                        <path d="M5 8l6 6M4 14l6-6 2-3M2 5h12M7 2v3M22 22l-5-10-5 10M14 18h6" />
-                                    </svg>
-                                </button>
+                                <div class="textarea-actions">
+                                    <button class="magic-generate-btn" id="generate-headline-btn"
+                                        title="Generate headline with AI" aria-label="Generate headline with AI">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <path d="M12 3l1.4 4.3L18 9l-4.6 1.7L12 15l-1.4-4.3L6 9l4.6-1.7L12 3z" />
+                                            <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z" />
+                                        </svg>
+                                    </button>
+                                    <button class="magic-translate-btn" id="translate-headline-btn"
+                                        title="Translate to all languages" aria-label="Translate headline">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <path d="M5 8l6 6M4 14l6-6 2-3M2 5h12M7 2v3M22 22l-5-10-5 10M14 18h6" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -1103,13 +1113,23 @@
                         <div class="control-group">
                             <div class="textarea-with-button">
                                 <textarea id="subheadline-text" rows="2" placeholder="Optional subheadline"></textarea>
-                                <button class="magic-translate-btn" id="translate-subheadline-btn"
-                                    title="Translate to all languages">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                        stroke-width="2">
-                                        <path d="M5 8l6 6M4 14l6-6 2-3M2 5h12M7 2v3M22 22l-5-10-5 10M14 18h6" />
-                                    </svg>
-                                </button>
+                                <div class="textarea-actions">
+                                    <button class="magic-generate-btn" id="generate-subheadline-btn"
+                                        title="Generate subheadline with AI" aria-label="Generate subheadline with AI">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <path d="M12 3l1.4 4.3L18 9l-4.6 1.7L12 15l-1.4-4.3L6 9l4.6-1.7L12 3z" />
+                                            <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z" />
+                                        </svg>
+                                    </button>
+                                    <button class="magic-translate-btn" id="translate-subheadline-btn"
+                                        title="Translate to all languages" aria-label="Translate subheadline">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor" stroke-width="2">
+                                            <path d="M5 8l6 6M4 14l6-6 2-3M2 5h12M7 2v3M22 22l-5-10-5 10M14 18h6" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -1823,6 +1843,49 @@
         </div>
     </div>
 
+    <!-- AI Text Generation Modal -->
+    <div class="modal-overlay" id="ai-text-modal">
+        <div class="modal ai-text-modal">
+            <div class="modal-header">
+                <div>
+                    <h3 class="modal-title">Generate <span id="ai-text-target-label">Headline</span> with AI</h3>
+                    <p class="modal-message">AI will analyze the current screenshot and suggest concise App Store copy.</p>
+                </div>
+                <button class="modal-close" id="ai-text-close" aria-label="Close AI text generator">×</button>
+            </div>
+            <div class="ai-text-form">
+                <label class="control-label" for="ai-text-instructions">What should the copy emphasize? <span
+                        class="optional-label">Optional</span></label>
+                <textarea id="ai-text-instructions" rows="3"
+                    placeholder="e.g. Focus on speed, privacy, or the main user benefit"></textarea>
+                <div class="ai-text-form-row">
+                    <div>
+                        <label class="control-label" for="ai-text-tone">Tone</label>
+                        <select id="ai-text-tone">
+                            <option value="benefit-led">Benefit-led</option>
+                            <option value="bold">Bold</option>
+                            <option value="minimal">Minimal</option>
+                            <option value="playful">Playful</option>
+                            <option value="professional">Professional</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="control-label" for="ai-text-language">Language</label>
+                        <select id="ai-text-language"></select>
+                    </div>
+                </div>
+                <div class="ai-text-status" id="ai-text-status"></div>
+                <div class="ai-text-suggestions" id="ai-text-suggestions"></div>
+            </div>
+            <div class="modal-buttons">
+                <button class="modal-btn modal-btn-cancel" id="ai-text-cancel">Cancel</button>
+                <button class="modal-btn modal-btn-confirm ai-text-generate" id="ai-text-generate">
+                    <span>Generate suggestions</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- AI Image Generation Modal -->
     <div class="modal-overlay" id="ai-image-gen-modal">
         <div class="modal">
@@ -1943,10 +2006,10 @@
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
                     </svg>
-                    AI Translation Provider
+                    AI Provider
                 </h4>
-                <p class="settings-description">Choose which AI provider to use for translations. API keys are stored
-                    locally in your browser.</p>
+                <p class="settings-description">Choose which AI provider to use for text generation and translations.
+                    API keys are stored locally in your browser.</p>
                 <div class="settings-provider-selector">
                     <label class="settings-provider-option">
                         <input type="radio" name="ai-provider" value="anthropic" checked>
