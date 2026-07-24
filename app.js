@@ -3,6 +3,7 @@ const state = {
     screenshots: [],
     selectedIndex: 0,
     transferTarget: null, // Index of screenshot waiting to receive style transfer
+    transferType: 'style', // 'style' or 'device'
     outputDevice: 'iphone-6.9',
     currentLanguage: 'en', // Global current language for all text
     projectLanguages: ['en'], // Languages available in this project
@@ -5454,7 +5455,7 @@ Respond ONLY with valid JSON in this format:
             setAiTextStatus('The API key was rejected. Update it in Settings.', 'error');
         } else if (error.message === 'Failed to fetch' || error instanceof TypeError) {
             setAiTextStatus(
-                'Could not reach the AI provider. Open AppScreen through http://localhost:8000 or the deployed HTTPS site, then check your connection and provider key.',
+                'Could not reach the AI provider. Check your connection and provider key, then try again.',
                 'error'
             );
         } else if (error instanceof SyntaxError) {
@@ -6144,7 +6145,7 @@ Translate to these language codes: ${targetLangs.join(', ')}`;
 // Provider-specific translation functions
 async function translateWithAnthropic(apiKey, prompt) {
     const model = getSelectedModel('anthropic');
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetch("/api/ai/anthropic/v1/messages", {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -6171,7 +6172,7 @@ async function translateWithAnthropic(apiKey, prompt) {
 
 async function translateWithOpenAI(apiKey, prompt) {
     const model = getSelectedModel('openai');
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("/api/ai/openai/v1/chat/completions", {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -6202,10 +6203,11 @@ async function translateWithOpenAI(apiKey, prompt) {
 
 async function translateWithGoogle(apiKey, prompt) {
     const model = getSelectedModel('google');
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+    const response = await fetch(`/api/ai/google/v1beta/models/${model}:generateContent`, {
         method: "POST",
         headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey
         },
         body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }]
@@ -6722,8 +6724,9 @@ function updateScreenshotList() {
     if (state.transferTarget !== null && state.screenshots.length > 1) {
         const hint = document.createElement('div');
         hint.className = 'transfer-hint';
+        const transferLabel = state.transferType === 'device' ? 'device configuration' : 'style';
         hint.innerHTML = `
-            <span>Select a screenshot to copy style from</span>
+            <span>Select a screenshot to copy ${transferLabel} from</span>
             <button class="transfer-cancel" onclick="cancelTransfer()">Cancel</button>
         `;
         screenshotList.appendChild(hint);
@@ -6775,6 +6778,14 @@ function updateScreenshotList() {
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                         </svg>
                         Copy style from...
+                    </button>
+                    <button class="screenshot-menu-item screenshot-device-transfer" data-index="${index}">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="7" y="2" width="10" height="20" rx="2"/>
+                            <path d="M11 18h2"/>
+                            <path d="M3 7v10M21 7v10"/>
+                        </svg>
+                        Copy device from...
                     </button>
                     <button class="screenshot-menu-item screenshot-apply-all" data-index="${index}">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -6835,7 +6846,7 @@ function updateScreenshotList() {
             ${thumbHtml}
             <div class="screenshot-info">
                 <div class="screenshot-name">${screenshot.name}</div>
-                <div class="screenshot-device">${isTransferTarget ? 'Click source to copy style' : screenshot.deviceType}${langFlagsHtml}</div>
+                <div class="screenshot-device">${isTransferTarget ? `Click source to copy ${state.transferType === 'device' ? 'device' : 'style'}` : screenshot.deviceType}${langFlagsHtml}</div>
             </div>
             ${buttonsHtml}
         `;
@@ -6940,8 +6951,11 @@ function updateScreenshotList() {
             // Handle transfer mode click
             if (state.transferTarget !== null) {
                 if (index !== state.transferTarget) {
-                    // Transfer style from clicked screenshot to target
-                    transferStyle(index, state.transferTarget);
+                    if (state.transferType === 'device') {
+                        transferDeviceConfiguration(index, state.transferTarget);
+                    } else {
+                        transferStyle(index, state.transferTarget);
+                    }
                 }
                 return;
             }
@@ -7001,6 +7015,18 @@ function updateScreenshotList() {
                 e.stopPropagation();
                 menu?.classList.remove('open');
                 state.transferTarget = index;
+                state.transferType = 'style';
+                updateScreenshotList();
+            });
+        }
+
+        const deviceTransferBtn = item.querySelector('.screenshot-device-transfer');
+        if (deviceTransferBtn) {
+            deviceTransferBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                menu?.classList.remove('open');
+                state.transferTarget = index;
+                state.transferType = 'device';
                 updateScreenshotList();
             });
         }
@@ -7056,7 +7082,31 @@ function updateScreenshotList() {
 
 function cancelTransfer() {
     state.transferTarget = null;
+    state.transferType = 'style';
     updateScreenshotList();
+}
+
+function transferDeviceConfiguration(sourceIndex, targetIndex) {
+    const source = state.screenshots[sourceIndex];
+    const target = state.screenshots[targetIndex];
+
+    if (!source || !target) {
+        cancelTransfer();
+        return;
+    }
+
+    // Copy device placement, frame, shadow, 2D/3D mode, and multi-device layout.
+    // Preserve the target screenshot image, background, copy, elements, and popouts.
+    target.screenshot = JSON.parse(JSON.stringify(source.screenshot));
+    target.devices = JSON.parse(JSON.stringify(source.devices || []));
+
+    state.transferTarget = null;
+    state.transferType = 'style';
+    state.selectedIndex = targetIndex;
+
+    updateScreenshotList();
+    syncUIWithState();
+    updateCanvas();
 }
 
 function transferStyle(sourceIndex, targetIndex) {
@@ -7099,6 +7149,7 @@ function transferStyle(sourceIndex, targetIndex) {
 
     // Reset transfer mode
     state.transferTarget = null;
+    state.transferType = 'style';
 
     // Update UI
     updateScreenshotList();

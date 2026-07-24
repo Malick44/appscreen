@@ -116,7 +116,7 @@ async function generateTitlesWithAnthropic(apiKey, images, prompt) {
 
     content.push({ type: "text", text: prompt });
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetch("/api/ai/anthropic/v1/messages", {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -167,7 +167,7 @@ async function generateTitlesWithOpenAI(apiKey, images, prompt) {
 
     content.push({ type: "text", text: prompt });
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("/api/ai/openai/v1/chat/completions", {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -216,10 +216,11 @@ async function generateTitlesWithGoogle(apiKey, images, prompt) {
 
     parts.push({ text: prompt });
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+    const response = await fetch(`/api/ai/google/v1beta/models/${model}:generateContent`, {
         method: "POST",
         headers: {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey
         },
         body: JSON.stringify({
             contents: [{ parts: parts }]
