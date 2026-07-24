@@ -2783,7 +2783,7 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 .textarea-with-button textarea {
-    padding-right: 68px;
+    padding-right: 112px;
 }
 
 .textarea-with-button .textarea-actions {
@@ -2811,7 +2811,13 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 .magic-generate-btn {
+    width: auto;
+    padding: 0 8px;
+    gap: 4px;
     background: linear-gradient(135deg, #ffb347 0%, #ff7b54 100%);
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
 }
 
 .magic-translate-btn:hover,
