@@ -36,6 +36,7 @@ const state = {
             x: 50,
             rotation: 0,
             perspective: 0,
+            opacity: 100,
             cornerRadius: 24,
             use3D: false,
             device3D: 'iphone',
@@ -117,37 +118,88 @@ const baseTextDefaults = JSON.parse(JSON.stringify(state.defaults.text));
 // Runtime-only state (not persisted)
 let selectedElementId = null;
 let selectedPopoutId = null;
+let selectedDeviceId = null;
 let draggingElement = null;
+let draggingDevice = null;
 let templateUndoSnapshot = null;
+let templateToastTimer = null;
+let templateGalleryReturnFocus = null;
 
-function captureTemplateSnapshot() {
-    const screenshot = getCurrentScreenshot();
-    if (!screenshot) return;
+function cloneTemplateElements(elements) {
+    return (elements || []).map(element => {
+        const serializable = { ...element };
+        delete serializable.image;
+        return { ...JSON.parse(JSON.stringify(serializable)), image: element.image || null };
+    });
+}
+
+function captureTemplateSnapshot(indices = [state.selectedIndex]) {
+    const screens = [...new Set(indices)]
+        .filter(index => state.screenshots[index])
+        .map(index => {
+            const screenshot = state.screenshots[index];
+            return {
+                index,
+                screenshotId: screenshot.id,
+                background: cloneBackground(screenshot.background),
+                screenshot: JSON.parse(JSON.stringify(screenshot.screenshot)),
+                text: JSON.parse(JSON.stringify(screenshot.text)),
+                elements: cloneTemplateElements(screenshot.elements),
+                devices: JSON.parse(JSON.stringify(screenshot.devices || []))
+            };
+        });
+    if (!screens.length) return;
     templateUndoSnapshot = {
-        index: state.selectedIndex,
-        background: cloneBackground(screenshot.background),
-        screenshot: JSON.parse(JSON.stringify(screenshot.screenshot)),
-        text: JSON.parse(JSON.stringify(screenshot.text)),
-        elements: JSON.parse(JSON.stringify((screenshot.elements || []).map(el => ({ ...el, image: undefined })))),
-        devices: JSON.parse(JSON.stringify(screenshot.devices || []))
+        selectedIndex: state.selectedIndex,
+        selectedScreenshotId: state.screenshots[state.selectedIndex]?.id || null,
+        screens
     };
     const button = document.getElementById('undo-template-btn');
     if (button) button.disabled = false;
 }
 
+function showTemplateToast(message, allowUndo = false) {
+    clearTimeout(templateToastTimer);
+    document.getElementById('template-toast')?.remove();
+    const toast = document.createElement('div');
+    toast.id = 'template-toast';
+    toast.className = 'template-toast';
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    toast.innerHTML = `<span>${message}</span>${allowUndo ? '<button type="button">Undo layout</button>' : ''}`;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('visible'));
+    toast.querySelector('button')?.addEventListener('click', undoLastTemplate);
+    templateToastTimer = setTimeout(() => {
+        toast.classList.remove('visible');
+        setTimeout(() => toast.remove(), 180);
+    }, 5200);
+}
+
 function undoLastTemplate() {
     if (!templateUndoSnapshot) return;
-    const screenshot = state.screenshots[templateUndoSnapshot.index];
-    if (!screenshot) return;
-    screenshot.background = cloneBackground(templateUndoSnapshot.background);
-    screenshot.screenshot = templateUndoSnapshot.screenshot;
-    screenshot.text = templateUndoSnapshot.text;
-    screenshot.elements = templateUndoSnapshot.elements;
-    screenshot.devices = templateUndoSnapshot.devices;
-    state.selectedIndex = templateUndoSnapshot.index;
+    templateUndoSnapshot.screens.forEach(snapshot => {
+        const screenshot = snapshot.screenshotId
+            ? state.screenshots.find(candidate => candidate.id === snapshot.screenshotId)
+            : state.screenshots[snapshot.index];
+        if (!screenshot) return;
+        screenshot.background = cloneBackground(snapshot.background);
+        screenshot.screenshot = snapshot.screenshot;
+        screenshot.text = snapshot.text;
+        screenshot.elements = snapshot.elements;
+        screenshot.devices = snapshot.devices;
+    });
+    const selectedById = templateUndoSnapshot.selectedScreenshotId
+        ? state.screenshots.findIndex(screenshot => screenshot.id === templateUndoSnapshot.selectedScreenshotId)
+        : -1;
+    state.selectedIndex = selectedById >= 0
+        ? selectedById
+        : Math.min(templateUndoSnapshot.selectedIndex, Math.max(0, state.screenshots.length - 1));
+    selectedDeviceId = null;
     templateUndoSnapshot = null;
     document.getElementById('undo-template-btn').disabled = true;
-    syncUIWithState(); updateElementsList(); updateCanvas();
+    syncUIWithState(); updateElementsList(); updateScreenshotList(); updateCanvas();
+    showTemplateToast('Template changes undone.');
 }
 
 function templateShapeToElement(shape) {
@@ -157,49 +209,491 @@ function templateShapeToElement(shape) {
         fill: shape.fill, cornerRadius: shape.cornerRadius || 0, layer: shape.layer || 'behind-screenshot' };
 }
 
-function applyTemplate(templateId, mode = 'all') {
-    const screenshot = getCurrentScreenshot();
-    const template = typeof APP_TEMPLATES !== 'undefined' && APP_TEMPLATES.find(item => item.id === templateId);
-    if (!screenshot || !template) return;
-    captureTemplateSnapshot();
-    if (mode !== 'layout') screenshot.background = { ...cloneBackground(screenshot.background), ...JSON.parse(JSON.stringify(template.background)) };
+function getTemplateScenes(template) {
+    return template.type === 'sequence' ? (template.scenes || []) : [template];
+}
+
+function getTemplateAvailability(template, startIndex = state.selectedIndex) {
+    const scenes = getTemplateScenes(template);
+    const missingScreenCount = scenes.filter((_, offset) => !state.screenshots[startIndex + offset]).length;
+    if (missingScreenCount) {
+        return {
+            available: false,
+            message: `Needs ${missingScreenCount} more screenshot${missingScreenCount === 1 ? '' : 's'}`
+        };
+    }
+
+    if (template.type === 'sequence') {
+        const requiredSourceIndices = new Set();
+        scenes.forEach((scene, sceneOffset) => {
+            (scene.devices || []).forEach(device => {
+                const sourceOffset = Number.isFinite(device.sourceOffset) ? device.sourceOffset : 0;
+                requiredSourceIndices.add(startIndex + sceneOffset + sourceOffset);
+            });
+        });
+        const missingImageScreens = [...requiredSourceIndices]
+            .filter(index => !getScreenshotImage(state.screenshots[index]))
+            .map(index => index + 1);
+        if (missingImageScreens.length) {
+            return {
+                available: false,
+                message: `Add images to screen${missingImageScreens.length === 1 ? '' : 's'} ${missingImageScreens.join(', ')}`
+            };
+        }
+    }
+
+    return { available: true, message: '' };
+}
+
+function resolveTemplateDevices(devices, targetIndex) {
+    return JSON.parse(JSON.stringify(devices || [])).map(device => {
+        device.id = device.id || crypto.randomUUID();
+        const sourceOffset = Number.isFinite(device.sourceOffset) ? device.sourceOffset : 0;
+        const sourceScreenshot = state.screenshots[targetIndex + sourceOffset];
+        if (sourceScreenshot) device.sourceScreenshotId = sourceScreenshot.id;
+        return device;
+    });
+}
+
+function devicePlacementsFormSeam(outgoing, incoming) {
+    if (outgoing?.positionMode !== 'canvas' || incoming?.positionMode !== 'canvas') return false;
+    const close = (a, b, tolerance = 0.0001) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= tolerance;
+    return close(incoming.centerX, outgoing.centerX - 1)
+        && close(incoming.centerY, outgoing.centerY)
+        && close(incoming.scale, outgoing.scale)
+        && close(incoming.rotation || 0, outgoing.rotation || 0)
+        && close(incoming.perspective || 0, outgoing.perspective || 0);
+}
+
+function ensureDeviceEditorNames(screenshot) {
+    const devices = screenshot?.devices || [];
+    if (!devices.length) return;
+    const primary = devices.find(device => isCurrentScreenshotDevice(screenshot, device));
+    const usedNames = new Set();
+    let nextOrdinal = primary ? 2 : 1;
+
+    devices.forEach(device => {
+        if (device.editorName && !usedNames.has(device.editorName)) {
+            usedNames.add(device.editorName);
+            return;
+        }
+        if (device === primary && !usedNames.has('Primary device')) {
+            device.editorName = 'Primary device';
+        } else {
+            while (usedNames.has(`Device ${nextOrdinal}`)) nextOrdinal += 1;
+            device.editorName = `Device ${nextOrdinal}`;
+            nextOrdinal += 1;
+        }
+        usedNames.add(device.editorName);
+    });
+}
+
+function getNextDeviceEditorName(screenshot) {
+    const usedNames = new Set((screenshot?.devices || []).map(device => device.editorName).filter(Boolean));
+    let ordinal = usedNames.has('Primary device') ? 2 : 1;
+    while (usedNames.has(`Device ${ordinal}`)) ordinal += 1;
+    return `Device ${ordinal}`;
+}
+
+function ensureDeviceMetadata() {
+    const linkedPlacements = new Map();
+    state.screenshots.forEach((screenshot, screenIndex) => {
+        ensureDeviceEditorNames(screenshot);
+        (screenshot.devices || []).forEach((device, deviceIndex) => {
+            device.id = device.id || crypto.randomUUID();
+            if (!device.placementLinkId) return;
+            if (!linkedPlacements.has(device.placementLinkId)) linkedPlacements.set(device.placementLinkId, []);
+            linkedPlacements.get(device.placementLinkId).push({ screenshot, screenIndex, device, deviceIndex });
+        });
+    });
+
+    linkedPlacements.forEach((contexts, placementLinkId) => {
+        const uniqueIndices = [...new Set(contexts.map(context => context.screenIndex))];
+        let remainsAdjacent = contexts.length === 2
+            && uniqueIndices.length === 2
+            && Math.abs(uniqueIndices[0] - uniqueIndices[1]) === 1;
+        if (remainsAdjacent) {
+            const [outgoing, incoming] = [...contexts].sort((a, b) => a.screenIndex - b.screenIndex);
+            remainsAdjacent = isCurrentScreenshotDevice(outgoing.screenshot, outgoing.device)
+                && getDeviceSourceIndex(incoming.screenIndex, incoming.device) === outgoing.screenIndex;
+        }
+        if (remainsAdjacent) return;
+        contexts.forEach(context => {
+            delete context.device.placementLinkId;
+            delete context.device.seamLocked;
+        });
+    });
+
+    for (let screenIndex = 1; screenIndex < state.screenshots.length; screenIndex += 1) {
+        const previous = state.screenshots[screenIndex - 1];
+        const current = state.screenshots[screenIndex];
+        if (!previous || !current) continue;
+        const previousOutgoing = (previous.devices || []).filter(device =>
+            isCurrentScreenshotDevice(previous, device) && device.positionMode === 'canvas');
+        (current.devices || []).forEach(incoming => {
+            if (incoming.sourceScreenshotId !== previous.id || incoming.positionMode !== 'canvas') return;
+            const matches = previousOutgoing.filter(outgoing => devicePlacementsFormSeam(outgoing, incoming));
+            if (matches.length !== 1) return;
+            const outgoing = matches[0];
+            const placementLinkId = outgoing.placementLinkId || incoming.placementLinkId || crypto.randomUUID();
+            outgoing.placementLinkId = placementLinkId;
+            incoming.placementLinkId = placementLinkId;
+            if (outgoing.seamLocked === undefined) outgoing.seamLocked = true;
+            if (incoming.seamLocked === undefined) incoming.seamLocked = outgoing.seamLocked;
+        });
+    }
+    normalizeDeviceRenderingModes();
+}
+
+function applyTemplateScene(screenshot, scene, targetIndex, mode, isSequence) {
+    if (mode !== 'layout') screenshot.background = { ...cloneBackground(screenshot.background), ...JSON.parse(JSON.stringify(scene.background)) };
     const existingNonTemplateElements = (screenshot.elements || []).filter(el => !el.templateElement);
-    screenshot.elements = existingNonTemplateElements.concat((template.shapes || []).map(shape => ({ ...templateShapeToElement(shape), templateElement: true })));
-    screenshot.devices = JSON.parse(JSON.stringify(template.devices || []));
-    if (template.devices?.[0]) Object.assign(screenshot.screenshot, template.devices[0]);
+    screenshot.elements = existingNonTemplateElements.concat((scene.shapes || []).map(shape => ({ ...templateShapeToElement(shape), templateElement: true })));
+    screenshot.devices = resolveTemplateDevices(scene.devices, targetIndex);
+
+    const primaryDevice = screenshot.devices.find(device => (device.sourceOffset ?? 0) === 0) || screenshot.devices[0];
+    if (primaryDevice) {
+        const primarySettings = { ...primaryDevice };
+        delete primarySettings.source;
+        delete primarySettings.sourceOffset;
+        delete primarySettings.sourceScreenshotId;
+        delete primarySettings.opacity;
+        delete primarySettings.continueToNext;
+        delete primarySettings.sequenceName;
+        delete primarySettings.continuationCycle;
+        delete primarySettings.continuationStep;
+        delete primarySettings.continuationTextPositions;
+        Object.assign(screenshot.screenshot, primarySettings);
+    }
+    if (isSequence) screenshot.screenshot.use3D = false;
+
     const preservedHeadlines = screenshot.text.headlines;
     const preservedSubheadlines = screenshot.text.subheadlines;
-    Object.assign(screenshot.text, JSON.parse(JSON.stringify(template.text || {})));
+    Object.assign(screenshot.text, JSON.parse(JSON.stringify(scene.text || {})));
     if (mode !== 'replace') {
         screenshot.text.headlines = preservedHeadlines;
         screenshot.text.subheadlines = preservedSubheadlines;
     }
-    closeTemplateGallery(); syncUIWithState(); updateElementsList(); updateCanvas();
 }
 
-function closeTemplateGallery() { document.getElementById('template-gallery-overlay')?.remove(); }
+function detachExternalDeviceReferences(targetIndices) {
+    const targetIndexSet = new Set(targetIndices);
+    state.screenshots.forEach((screenshot, screenshotIndex) => {
+        if (targetIndexSet.has(screenshotIndex)) return;
+        screenshot.devices = (screenshot.devices || []).filter(device =>
+            !targetIndexSet.has(getDeviceSourceIndex(screenshotIndex, device)));
+    });
+}
+
+function applyTemplate(templateId, mode = 'all') {
+    const template = typeof APP_TEMPLATES !== 'undefined' && APP_TEMPLATES.find(item => item.id === templateId);
+    if (!getCurrentScreenshot() || !template) return false;
+
+    const scenes = getTemplateScenes(template);
+    const startIndex = state.selectedIndex;
+    const targetIndices = scenes.map((_, offset) => startIndex + offset);
+    const availability = getTemplateAvailability(template, startIndex);
+    if (!availability.available) {
+        showAppAlert(`${template.name} needs ${scenes.length} ready, consecutive screenshots. ${availability.message}.`, 'info');
+        return false;
+    }
+
+    const snapshotIndices = template.type === 'sequence'
+        ? targetIndices
+        : [...new Set([
+            ...targetIndices,
+            ...getLinkedDeviceScreens(state.screenshots[startIndex])
+                .map(screenshot => state.screenshots.indexOf(screenshot))
+                .filter(index => index >= 0)
+        ])];
+    captureTemplateSnapshot(snapshotIndices);
+    if (template.type !== 'sequence') detachExternalDeviceReferences(targetIndices);
+    scenes.forEach((scene, offset) => {
+        applyTemplateScene(state.screenshots[startIndex + offset], scene, startIndex + offset, mode, template.type === 'sequence');
+    });
+    ensureDeviceMetadata();
+
+    state.selectedIndex = startIndex;
+    selectedDeviceId = null;
+    closeTemplateGallery();
+    syncUIWithState(); updateElementsList(); updateScreenshotList(); updateCanvas();
+    showTemplateToast(template.type === 'sequence'
+        ? `${template.name} applied to screens ${startIndex + 1}–${startIndex + scenes.length}.`
+        : `${template.name} applied.`, true);
+    return true;
+}
+
+function isCurrentScreenshotDevice(screenshot, device) {
+    const sourceOffset = Number.isFinite(device?.sourceOffset) ? device.sourceOffset : 0;
+    return sourceOffset === 0 && (!device?.sourceScreenshotId || device.sourceScreenshotId === screenshot?.id);
+}
+
+function getSequenceOutgoingDevices(screenshot, screenshotIndex) {
+    if (!screenshot) return [];
+    const devices = screenshot.devices || [];
+    const canCrossSeam = device => device.positionMode === 'canvas'
+        && Number.isFinite(device.centerX)
+        && Number.isFinite(device.centerY);
+    const explicitOutgoing = devices.filter(device => isCurrentScreenshotDevice(screenshot, device)
+        && device.hidden !== true
+        && device.continueToNext === true
+        && canCrossSeam(device));
+    if (explicitOutgoing.length) return explicitOutgoing;
+
+    // Backwards compatibility for sequences applied before the continuation flag existed.
+    const hasValidIncomingDevice = devices.some(device => {
+        const sourceOffset = Number.isFinite(device.sourceOffset) ? device.sourceOffset : 0;
+        const offsetSource = sourceOffset < 0 ? state.screenshots[screenshotIndex + sourceOffset] : null;
+        const idSource = device.sourceScreenshotId
+            ? state.screenshots.find(candidate => candidate.id === device.sourceScreenshotId)
+            : null;
+        return Boolean(offsetSource || (idSource && idSource.id !== screenshot.id));
+    });
+    const hasTemplateArtwork = (screenshot.elements || []).some(element => element.templateElement);
+    if (!hasValidIncomingDevice || !hasTemplateArtwork) return [];
+
+    return devices.filter(device => isCurrentScreenshotDevice(screenshot, device)
+        && device.hidden !== true
+        && canCrossSeam(device)
+        && device.centerX >= 0.68);
+}
+
+function inheritSequenceTextStyle(sourceText, targetText) {
+    const inherited = JSON.parse(JSON.stringify(sourceText || targetText || {}));
+    const target = targetText || {};
+    ['headlines', 'subheadlines', 'headlineLanguages', 'subheadlineLanguages', 'currentHeadlineLang', 'currentSubheadlineLang', 'currentLayoutLang']
+        .forEach(key => {
+            if (!(key in target)) return;
+            const serializedValue = JSON.stringify(target[key]);
+            inherited[key] = serializedValue === undefined ? target[key] : JSON.parse(serializedValue);
+        });
+    return inherited;
+}
+
+function createNextSequenceOutgoingDevice(device, nextScreenshotId) {
+    const nextDevice = JSON.parse(JSON.stringify(device));
+    nextDevice.id = crypto.randomUUID();
+    delete nextDevice.placementLinkId;
+    const cycle = Array.isArray(device.continuationCycle) ? device.continuationCycle : [];
+    if (cycle.length) {
+        const currentStep = Number.isInteger(device.continuationStep) ? device.continuationStep : cycle.length - 1;
+        const nextStep = (currentStep + 1) % cycle.length;
+        Object.assign(nextDevice, JSON.parse(JSON.stringify(cycle[nextStep])));
+        nextDevice.continuationStep = nextStep;
+    }
+    nextDevice.sourceOffset = 0;
+    nextDevice.sourceScreenshotId = nextScreenshotId;
+    nextDevice.continueToNext = true;
+    return nextDevice;
+}
+
+function continueSequenceOntoScreenshot(previousIndex, nextIndex) {
+    if (nextIndex !== previousIndex + 1) return false;
+    const previous = state.screenshots[previousIndex];
+    const next = state.screenshots[nextIndex];
+    const outgoingDevices = getSequenceOutgoingDevices(previous, previousIndex);
+    if (!previous || !next || !outgoingDevices.length) return false;
+
+    captureTemplateSnapshot([previousIndex, nextIndex]);
+    next.background = cloneBackground(previous.background);
+    next.screenshot = JSON.parse(JSON.stringify(previous.screenshot));
+    next.screenshot.use3D = false;
+    next.text = inheritSequenceTextStyle(previous.text, next.text);
+
+    const existingElements = (next.elements || []).filter(element => !element.templateElement);
+    const inheritedElements = cloneTemplateElements((previous.elements || []).filter(element => element.templateElement))
+        .map(element => ({ ...element, id: crypto.randomUUID() }));
+    next.elements = existingElements.concat(inheritedElements);
+
+    const incomingDevices = outgoingDevices.map(device => {
+        const placementLinkId = crypto.randomUUID();
+        device.id = device.id || crypto.randomUUID();
+        device.placementLinkId = placementLinkId;
+        device.seamLocked = true;
+        return {
+            ...JSON.parse(JSON.stringify(device)),
+            id: crypto.randomUUID(),
+            placementLinkId,
+            seamLocked: true,
+            sourceOffset: -1,
+            sourceScreenshotId: previous.id,
+            centerX: device.centerX - 1,
+            continueToNext: false
+        };
+    });
+    const nextOutgoingDevices = outgoingDevices.map(device => createNextSequenceOutgoingDevice(device, next.id));
+    next.devices = incomingDevices.concat(nextOutgoingDevices);
+    ensureDeviceMetadata();
+
+    const primaryOutgoing = nextOutgoingDevices[0];
+    ['positionMode', 'centerX', 'centerY', 'scale', 'x', 'y', 'rotation', 'perspective']
+        .forEach(key => {
+            if (primaryOutgoing && key in primaryOutgoing) next.screenshot[key] = primaryOutgoing[key];
+        });
+    const nextTextPosition = primaryOutgoing?.continuationTextPositions?.[primaryOutgoing.continuationStep];
+    if (nextTextPosition) {
+        next.text.position = nextTextPosition;
+        next.text.offsetY = nextTextPosition === 'top' ? 7 : 6;
+        if (next.text.perLanguageLayout) {
+            Object.values(next.text.languageSettings || {}).forEach(languageLayout => {
+                languageLayout.position = nextTextPosition;
+                languageLayout.offsetY = next.text.offsetY;
+            });
+        }
+    }
+    return { sequenceName: primaryOutgoing?.sequenceName || 'the sequence' };
+}
+
+function closeTemplateGallery({ restoreFocus = true } = {}) {
+    const overlay = document.getElementById('template-gallery-overlay');
+    overlay?.templateThumbnailObserver?.disconnect();
+    overlay?.remove();
+    if (restoreFocus && templateGalleryReturnFocus?.isConnected) templateGalleryReturnFocus.focus();
+    templateGalleryReturnFocus = null;
+}
 
 function renderTemplateThumbnail(template, element) {
-    const c = document.createElement('canvas'); c.width = 270; c.height = 480; const cctx = c.getContext('2d');
-    drawBackgroundToContext(cctx, { width: c.width, height: c.height }, template.background);
-    drawElementsToContext(cctx, { width: c.width, height: c.height }, (template.shapes || []).map(templateShapeToElement), 'behind-screenshot');
-    (template.devices || []).forEach(device => { const w = c.width * (device.scale / 100) * .48, h = w * 2.08;
-        cctx.save(); cctx.translate(c.width * device.x / 100, c.height * device.y / 100); cctx.rotate((device.rotation || 0) * Math.PI / 180);
-        cctx.shadowColor='#0006'; cctx.shadowBlur=12; cctx.fillStyle='#141419'; cctx.beginPath(); cctx.roundRect(-w/2,-h/2,w,h,14); cctx.fill();
-        cctx.shadowColor='transparent'; cctx.fillStyle='#f8f8fb'; cctx.beginPath(); cctx.roundRect(-w/2+5,-h/2+5,w-10,h-10,10); cctx.fill(); cctx.restore(); });
+    const scenes = getTemplateScenes(template);
+    const isSequence = template.type === 'sequence';
+    const panelWidth = 270;
+    const gap = isSequence ? 10 : 0;
+    const c = document.createElement('canvas');
+    c.width = panelWidth * scenes.length + gap * (scenes.length - 1);
+    c.height = 480;
+    const cctx = c.getContext('2d');
+    cctx.fillStyle = '#111216'; cctx.fillRect(0, 0, c.width, c.height);
+
+    scenes.forEach((scene, sceneIndex) => {
+        const panelX = sceneIndex * (panelWidth + gap);
+        const dims = { width: panelWidth, height: c.height };
+        cctx.save();
+        cctx.translate(panelX, 0);
+        cctx.beginPath(); cctx.rect(0, 0, dims.width, dims.height); cctx.clip();
+        drawBackgroundToContext(cctx, dims, scene.background);
+        drawElementsToContext(cctx, dims, (scene.shapes || []).map(templateShapeToElement), 'behind-screenshot');
+        (scene.devices || []).forEach(device => {
+            const w = dims.width * (device.scale / 100) * (isSequence ? .82 : .48);
+            const h = w * 2.08;
+            const centerX = device.positionMode === 'canvas' ? dims.width * device.centerX : dims.width * device.x / 100;
+            const centerY = device.positionMode === 'canvas' ? dims.height * device.centerY : dims.height * device.y / 100;
+            cctx.save(); cctx.translate(centerX, centerY); cctx.rotate((device.rotation || 0) * Math.PI / 180);
+            cctx.shadowColor='#0006'; cctx.shadowBlur=12; cctx.fillStyle='#141419'; cctx.beginPath(); cctx.roundRect(-w/2,-h/2,w,h,14); cctx.fill();
+            cctx.shadowColor='transparent'; cctx.fillStyle='#f8f8fb'; cctx.beginPath(); cctx.roundRect(-w/2+5,-h/2+5,w-10,h-10,10); cctx.fill(); cctx.restore();
+        });
+        cctx.restore();
+    });
     element.style.backgroundImage = `url(${c.toDataURL('image/png')})`; element.classList.add('is-rendered');
 }
 
 function openTemplateGallery() {
-    closeTemplateGallery();
+    closeTemplateGallery({ restoreFocus: false });
+    templateGalleryReturnFocus = document.activeElement;
     const overlay = document.createElement('div');
     overlay.id = 'template-gallery-overlay'; overlay.className = 'modal-overlay visible';
-    overlay.innerHTML = `<div class="modal template-gallery"><div class="template-gallery-header"><div><h2>Choose a template</h2><p>Keep your screenshot and copy while applying a complete art direction.</p></div><button class="modal-close" data-close>&times;</button></div><div class="template-mode" role="group" aria-label="Application mode"><label><input type="radio" name="template-mode" value="all" checked> Colors + layout</label><label><input type="radio" name="template-mode" value="layout"> Layout only</label><label><input type="radio" name="template-mode" value="replace"> Replace everything</label></div><div class="template-grid">${APP_TEMPLATES.map(t => `<button class="template-card" data-template="${t.id}"><span class="template-preview" style="--c1:${t.palette[0]};--c2:${t.palette[1]};--ink:${t.palette[2]}"><i></i><b></b><em></em></span><strong>${t.name}</strong><small>${t.category}</small></button>`).join('')}</div></div>`;
+    const sequenceTemplates = APP_TEMPLATES.filter(template => template.type === 'sequence');
+    const singleTemplates = APP_TEMPLATES.filter(template => template.type !== 'sequence');
+    const renderCard = template => {
+        const isSequence = template.type === 'sequence';
+        const screenCount = getTemplateScenes(template).length;
+        const availability = getTemplateAvailability(template);
+        const isUnavailable = isSequence && !availability.available;
+        const helper = isUnavailable
+            ? availability.message
+            : isSequence
+                ? (template.description || 'Connected device composition')
+                : template.category;
+        return `<button type="button" class="template-card${isSequence ? ' template-card-sequence' : ''}" data-template="${template.id}"${isUnavailable ? ' aria-disabled="true"' : ''}>
+            <span class="template-preview${isSequence ? ' is-sequence' : ''}" aria-hidden="true" style="--c1:${template.palette[0]};--c2:${template.palette[1]};--ink:${template.palette[2]}"><i></i><b></b><em></em></span>
+            <span class="template-card-heading"><strong>${template.name}</strong>${isSequence ? `<span class="template-badge">${screenCount}+ screens</span>` : ''}</span>
+            <small>${helper}</small><span class="template-card-action">${isSequence ? `Start with ${screenCount} screens` : 'Apply template'}</span>
+        </button>`;
+    };
+    const sequenceCards = sequenceTemplates.map(renderCard).join('');
+    const singleCards = singleTemplates.map(renderCard).join('');
+    overlay.innerHTML = `<div class="modal template-gallery" role="dialog" aria-modal="true" aria-labelledby="template-gallery-title" aria-describedby="template-gallery-description">
+        <div class="template-gallery-chrome">
+            <div class="template-gallery-header"><div><h2 id="template-gallery-title">Choose a template</h2><p id="template-gallery-description">Keep your screenshots and copy while applying a complete art direction.</p></div><button type="button" class="modal-close" data-close aria-label="Close template gallery">&times;</button></div>
+            <div class="template-mode" role="group" aria-label="Application mode"><label><input type="radio" name="template-mode" value="all" checked> Colors + layout</label><label><input type="radio" name="template-mode" value="layout"> Layout only</label><label><input type="radio" name="template-mode" value="replace"> Replace everything</label></div>
+        </div>
+        <div class="template-gallery-scroll">
+            <section class="template-section" aria-labelledby="sequence-template-heading">
+                <div class="template-section-header"><div><h3 id="sequence-template-heading">Sequence starters</h3><p>Start with three connected screens, then continue the flow as you add more.</p></div><span class="template-section-count">${sequenceTemplates.length}</span></div>
+                <div class="template-grid template-grid-sequences">${sequenceCards}</div>
+            </section>
+            <section class="template-section" aria-labelledby="single-template-heading">
+                <div class="template-section-header"><div><h3 id="single-template-heading">Single-screen looks</h3><p>Complete art directions for one screenshot.</p></div><span class="template-section-count">${singleTemplates.length}</span></div>
+                <div class="template-grid template-grid-singles">${singleCards}</div>
+            </section>
+        </div>
+    </div>`;
     document.body.appendChild(overlay);
-    overlay.querySelectorAll('[data-template]').forEach(card => renderTemplateThumbnail(APP_TEMPLATES.find(t => t.id === card.dataset.template), card.querySelector('.template-preview')));
-    overlay.querySelector('[data-close]').onclick = closeTemplateGallery;
-    overlay.onclick = e => { if (e.target === overlay) closeTemplateGallery(); };
-    overlay.querySelectorAll('[data-template]').forEach(card => card.onclick = () => applyTemplate(card.dataset.template, overlay.querySelector('[name="template-mode"]:checked').value));
+    const templateCards = [...overlay.querySelectorAll('[data-template]')];
+    const renderCardThumbnail = card => {
+        if (card.dataset.thumbnailRendered) return;
+        renderTemplateThumbnail(APP_TEMPLATES.find(template => template.id === card.dataset.template), card.querySelector('.template-preview'));
+        card.dataset.thumbnailRendered = 'true';
+    };
+    if ('IntersectionObserver' in window) {
+        overlay.templateThumbnailObserver = new IntersectionObserver(entries => {
+            entries.forEach(entry => {
+                if (!entry.isIntersecting) return;
+                renderCardThumbnail(entry.target);
+                overlay.templateThumbnailObserver.unobserve(entry.target);
+            });
+        }, { root: overlay.querySelector('.template-gallery-scroll'), rootMargin: '220px' });
+        templateCards.forEach(card => overlay.templateThumbnailObserver.observe(card));
+    } else {
+        templateCards.forEach(renderCardThumbnail);
+    }
+
+    const closeGallery = () => closeTemplateGallery();
+    overlay.querySelector('[data-close]').onclick = closeGallery;
+    overlay.onclick = event => { if (event.target === overlay) closeGallery(); };
+    overlay.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            closeGallery();
+            return;
+        }
+        if (event.key !== 'Tab') return;
+        const focusable = [...overlay.querySelectorAll('button:not(:disabled), input:not(:disabled)')]
+            .filter(element => element.offsetParent !== null);
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    });
+    overlay.querySelector('[data-close]').focus();
+
+    templateCards.forEach(card => card.onclick = () => {
+        const template = APP_TEMPLATES.find(item => item.id === card.dataset.template);
+        const availability = getTemplateAvailability(template);
+        if (template.type === 'sequence' && !availability.available) {
+            showAppAlert(`${template.name} needs ${getTemplateScenes(template).length} ready, consecutive screenshots. ${availability.message}.`, 'info');
+            return;
+        }
+        const action = card.querySelector('.template-card-action');
+        const idleLabel = action.textContent;
+        card.classList.add('is-applying');
+        card.disabled = true;
+        card.setAttribute('aria-busy', 'true');
+        action.textContent = 'Applying…';
+        setTimeout(() => {
+            const didApply = applyTemplate(card.dataset.template, overlay.querySelector('[name="template-mode"]:checked').value);
+            if (!didApply && card.isConnected) {
+                card.classList.remove('is-applying');
+                card.disabled = false;
+                card.removeAttribute('aria-busy');
+                action.textContent = idleLabel;
+            }
+        }, 120);
+    });
 }
 
 // Preload laurel SVG images for element frames
@@ -224,6 +718,29 @@ function getBackground() {
 function getScreenshotSettings() {
     const screenshot = getCurrentScreenshot();
     return screenshot ? screenshot.screenshot : state.defaults.screenshot;
+}
+
+function getDeviceSourceImage(renderIndex, device, fallbackImage = null) {
+    if (device?.sourceScreenshotId) {
+        const sourceScreenshot = state.screenshots.find(screenshot => screenshot.id === device.sourceScreenshotId) || null;
+        return sourceScreenshot ? getScreenshotImage(sourceScreenshot) : null;
+    }
+    if (Number.isFinite(device?.sourceOffset)) {
+        const sourceScreenshot = state.screenshots[renderIndex + device.sourceOffset] || null;
+        return sourceScreenshot ? (getScreenshotImage(sourceScreenshot) || fallbackImage) : fallbackImage;
+    }
+    return fallbackImage;
+}
+
+function syncDeviceSourceOffsets() {
+    const indicesById = new Map(state.screenshots.map((screenshot, index) => [screenshot.id, index]));
+    state.screenshots.forEach((screenshot, screenshotIndex) => {
+        (screenshot.devices || []).forEach(device => {
+            if (!device.sourceScreenshotId || !indicesById.has(device.sourceScreenshotId)) return;
+            device.sourceOffset = indicesById.get(device.sourceScreenshotId) - screenshotIndex;
+        });
+    });
+    ensureDeviceMetadata();
 }
 
 function getText() {
@@ -724,20 +1241,599 @@ function setBackground(key, value) {
     }
 }
 
+function setObjectPath(target, key, value) {
+    if (!key.includes('.')) {
+        target[key] = value;
+        return;
+    }
+    const parts = key.split('.');
+    let obj = target;
+    for (let i = 0; i < parts.length - 1; i++) {
+        if (!obj[parts[i]] || typeof obj[parts[i]] !== 'object') obj[parts[i]] = {};
+        obj = obj[parts[i]];
+    }
+    obj[parts[parts.length - 1]] = value;
+}
+
+function getLinkedDeviceScreens(originScreenshot) {
+    if (!originScreenshot?.id) return originScreenshot ? [originScreenshot] : [];
+
+    const screensById = new Map(state.screenshots.filter(screenshot => screenshot.id).map(screenshot => [screenshot.id, screenshot]));
+    const links = new Map();
+    const addLink = (fromId, toId) => {
+        if (!fromId || !toId || fromId === toId || !screensById.has(toId)) return;
+        if (!links.has(fromId)) links.set(fromId, new Set());
+        if (!links.has(toId)) links.set(toId, new Set());
+        links.get(fromId).add(toId);
+        links.get(toId).add(fromId);
+    };
+
+    state.screenshots.forEach((screenshot, screenshotIndex) => {
+        (screenshot.devices || []).forEach(device => {
+            if (!device.placementLinkId) return;
+            const offsetSource = Number.isFinite(device.sourceOffset)
+                ? state.screenshots[screenshotIndex + device.sourceOffset]
+                : null;
+            const storedSourceId = screensById.has(device.sourceScreenshotId) ? device.sourceScreenshotId : null;
+            addLink(screenshot.id, device.sourceScreenshotId ? storedSourceId : offsetSource?.id);
+        });
+    });
+
+    if (!links.has(originScreenshot.id)) return [originScreenshot];
+    const visited = new Set([originScreenshot.id]);
+    const queue = [originScreenshot.id];
+    while (queue.length) {
+        const currentId = queue.shift();
+        (links.get(currentId) || []).forEach(linkedId => {
+            if (visited.has(linkedId)) return;
+            visited.add(linkedId);
+            queue.push(linkedId);
+        });
+    }
+    return state.screenshots.filter(screenshot => visited.has(screenshot.id));
+}
+
+function deviceLayoutRequires2D(screenshot, screenIndex = state.screenshots.indexOf(screenshot)) {
+    const devices = screenshot?.devices || [];
+    return devices.length > 1
+        || devices.some(device => device.hidden === true)
+        || getLinkedDeviceScreens(screenshot).length > 1
+        || devices.some(device => device.placementLinkId
+            || getDeviceSourceIndex(screenIndex, device) !== screenIndex);
+}
+
+function normalizeDeviceRenderingModes() {
+    state.screenshots.forEach((screenshot, screenIndex) => {
+        if (screenshot?.screenshot?.use3D && deviceLayoutRequires2D(screenshot, screenIndex)) {
+            screenshot.screenshot.use3D = false;
+        }
+    });
+}
+
 function setScreenshotSetting(key, value) {
     const screenshot = getCurrentScreenshot();
-    if (screenshot) {
-        if (key.includes('.')) {
-            const parts = key.split('.');
-            let obj = screenshot.screenshot;
-            for (let i = 0; i < parts.length - 1; i++) {
-                obj = obj[parts[i]];
-            }
-            obj[parts[parts.length - 1]] = value;
-        } else {
-            screenshot.screenshot[key] = value;
-        }
+    if (!screenshot) return;
+
+    const isSharedDeviceAppearance = key === 'cornerRadius' || key.startsWith('frame.') || key.startsWith('shadow.');
+    const targets = isSharedDeviceAppearance ? getLinkedDeviceScreens(screenshot) : [screenshot];
+    targets.forEach(target => setObjectPath(target.screenshot, key, value));
+}
+
+function getDeviceRenderSettings(settings, device) {
+    return {
+        ...settings,
+        ...device,
+        // Border, shadow, and radius belong to the linked composition, not an individual placement.
+        frame: settings.frame,
+        shadow: settings.shadow,
+        cornerRadius: settings.cornerRadius
+    };
+}
+
+function getDeviceSourceIndex(screenshotIndex, device) {
+    if (device?.sourceScreenshotId) {
+        return state.screenshots.findIndex(screenshot => screenshot.id === device.sourceScreenshotId);
     }
+    if (Number.isFinite(device?.sourceOffset)) return screenshotIndex + device.sourceOffset;
+    return screenshotIndex;
+}
+
+function getSelectedDeviceContext() {
+    const screenshot = getCurrentScreenshot();
+    if (!screenshot) return null;
+    ensureDeviceMetadata();
+    const devices = screenshot.devices || [];
+    if (!devices.length) {
+        return {
+            screenshot,
+            screenIndex: state.selectedIndex,
+            device: screenshot.screenshot,
+            deviceIndex: -1,
+            isBase: true,
+            id: 'base-device'
+        };
+    }
+
+    let deviceIndex = devices.findIndex(device => device.id === selectedDeviceId);
+    if (deviceIndex < 0) {
+        deviceIndex = devices.findIndex(device => isCurrentScreenshotDevice(screenshot, device));
+        if (deviceIndex < 0) deviceIndex = 0;
+        selectedDeviceId = devices[deviceIndex].id;
+    }
+    return {
+        screenshot,
+        screenIndex: state.selectedIndex,
+        device: devices[deviceIndex],
+        deviceIndex,
+        isBase: false,
+        id: devices[deviceIndex].id
+    };
+}
+
+function getPlacementLinkContexts(placementLinkId) {
+    if (!placementLinkId) return [];
+    const contexts = [];
+    state.screenshots.forEach((screenshot, screenIndex) => {
+        (screenshot.devices || []).forEach((device, deviceIndex) => {
+            if (device.placementLinkId !== placementLinkId) return;
+            contexts.push({ screenshot, screenIndex, device, deviceIndex, isBase: false, id: device.id });
+        });
+    });
+    return contexts;
+}
+
+function getPlacementControlValue(device, key) {
+    if (key === 'x' && device?.positionMode === 'canvas' && Number.isFinite(device.centerX)) return device.centerX * 100;
+    if (key === 'y' && device?.positionMode === 'canvas' && Number.isFinite(device.centerY)) return device.centerY * 100;
+    if (key === 'opacity') return device?.opacity ?? 100;
+    return device?.[key] ?? 0;
+}
+
+function setPlacementControlValue(device, key, value) {
+    if (key === 'x' && device.positionMode === 'canvas') {
+        device.centerX = value / 100;
+        device.x = value;
+        return;
+    }
+    if (key === 'y' && device.positionMode === 'canvas') {
+        device.centerY = value / 100;
+        device.y = value;
+        return;
+    }
+    device[key] = value;
+}
+
+function syncPrimaryDeviceSettings(screenshot, device) {
+    if (!screenshot || !device || !isCurrentScreenshotDevice(screenshot, device)) return;
+    const primary = (screenshot.devices || []).find(candidate => isCurrentScreenshotDevice(screenshot, candidate));
+    if (primary !== device) return;
+    ['positionMode', 'centerX', 'centerY', 'scale', 'x', 'y', 'rotation', 'perspective', 'opacity']
+        .forEach(key => {
+            if (key in device) screenshot.screenshot[key] = device[key];
+        });
+}
+
+function updateDeviceContinuationAnchor(device) {
+    const cycle = Array.isArray(device?.continuationCycle) ? device.continuationCycle : null;
+    const step = Number.isInteger(device?.continuationStep) ? device.continuationStep : -1;
+    if (!cycle || !cycle[step]) return;
+    const anchor = cycle[step];
+    ['positionMode', 'centerX', 'centerY', 'scale', 'x', 'y', 'rotation', 'perspective', 'opacity']
+        .forEach(key => {
+            if (key in device) anchor[key] = device[key];
+        });
+}
+
+function setSelectedDeviceSetting(key, value) {
+    const selected = getSelectedDeviceContext();
+    if (!selected) return;
+    if (selected.isBase) {
+        setScreenshotSetting(key, value);
+        return;
+    }
+    if (selected.screenshot.screenshot.use3D) {
+        setScreenshotSetting(key, value);
+        // A single 2D placement and its 3D counterpart share layout controls.
+        if ((selected.screenshot.devices || []).length === 1
+            && isCurrentScreenshotDevice(selected.screenshot, selected.device)) {
+            setPlacementControlValue(selected.device, key, value);
+            syncPrimaryDeviceSettings(selected.screenshot, selected.device);
+        }
+        return;
+    }
+
+    const linked = selected.device.placementLinkId && selected.device.seamLocked !== false
+        ? getPlacementLinkContexts(selected.device.placementLinkId)
+        : [selected];
+    if (key === 'x' && selected.device.positionMode === 'canvas' && linked.length > 1) {
+        const globalCenterX = selected.screenIndex + value / 100;
+        linked.forEach(context => {
+            setPlacementControlValue(context.device, key, (globalCenterX - context.screenIndex) * 100);
+            syncPrimaryDeviceSettings(context.screenshot, context.device);
+            updateDeviceContinuationAnchor(context.device);
+        });
+        return;
+    }
+
+    linked.forEach(context => {
+        setPlacementControlValue(context.device, key, value);
+        syncPrimaryDeviceSettings(context.screenshot, context.device);
+        updateDeviceContinuationAnchor(context.device);
+    });
+}
+
+function createPlacementFromScreenshot(screenshot) {
+    const settings = screenshot.screenshot;
+    const placement = {
+        id: crypto.randomUUID(),
+        sourceOffset: 0,
+        sourceScreenshotId: screenshot.id,
+        scale: settings.scale ?? 70,
+        x: settings.x ?? 50,
+        y: settings.y ?? 60,
+        rotation: settings.rotation ?? 0,
+        perspective: settings.perspective ?? 0,
+        opacity: settings.opacity ?? 100
+    };
+    if (settings.positionMode === 'canvas' && Number.isFinite(settings.centerX) && Number.isFinite(settings.centerY)) {
+        placement.positionMode = 'canvas';
+        placement.centerX = settings.centerX;
+        placement.centerY = settings.centerY;
+    }
+    return placement;
+}
+
+function ensureBasePlacement(screenshot) {
+    if ((screenshot.devices || []).length) return screenshot.devices[0];
+    const placement = createPlacementFromScreenshot(screenshot);
+    screenshot.devices = [placement];
+    selectedDeviceId = placement.id;
+    return placement;
+}
+
+function clearPlacementLink(placementLinkId) {
+    getPlacementLinkContexts(placementLinkId).forEach(context => {
+        delete context.device.placementLinkId;
+        delete context.device.seamLocked;
+    });
+}
+
+function getDeviceEditorLabel(context) {
+    if (!context || context.isBase) return { title: 'Primary device', source: 'This screen', badge: '' };
+    const { screenshot, screenIndex, device, deviceIndex } = context;
+    const sourceIndex = getDeviceSourceIndex(screenIndex, device);
+    const source = sourceIndex >= 0 ? state.screenshots[sourceIndex] : null;
+    const linked = getPlacementLinkContexts(device.placementLinkId);
+    const previousLink = linked.find(candidate => candidate.screenIndex < screenIndex);
+    const nextLink = linked.find(candidate => candidate.screenIndex > screenIndex);
+    const isIncoming = source && source.id !== screenshot.id;
+    const currentDevices = (screenshot.devices || []).filter(candidate => isCurrentScreenshotDevice(screenshot, candidate));
+    const currentOrdinal = currentDevices.indexOf(device);
+    let title = isIncoming
+        ? 'Incoming device'
+        : (nextLink || device.continueToNext)
+            ? 'Outgoing device'
+            : device.editorName || (currentOrdinal <= 0 ? 'Primary device' : `Device ${deviceIndex + 1}`);
+    const badge = previousLink
+        ? `From ${previousLink.screenIndex + 1}`
+        : nextLink
+            ? `To ${nextLink.screenIndex + 1}`
+            : isIncoming && sourceIndex >= 0
+                ? `From ${sourceIndex + 1}`
+                : device.continueToNext
+                    ? 'Next'
+                    : '';
+    return {
+        title,
+        source: sourceIndex >= 0 ? `Screen ${sourceIndex + 1} · ${source?.name || 'Untitled'}` : 'Missing source',
+        badge
+    };
+}
+
+function escapeInspectorText(value) {
+    return String(value ?? '').replace(/[&<>'"]/g, character => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    })[character]);
+}
+
+function syncDevicePlacementControls(context = getSelectedDeviceContext()) {
+    if (!context) return;
+    const placement = context.screenshot.screenshot.use3D
+        ? context.screenshot.screenshot
+        : context.device;
+    const values = {
+        scale: getPlacementControlValue(placement, 'scale'),
+        x: getPlacementControlValue(placement, 'x'),
+        y: getPlacementControlValue(placement, 'y'),
+        rotation: getPlacementControlValue(placement, 'rotation'),
+        perspective: getPlacementControlValue(placement, 'perspective'),
+        opacity: getPlacementControlValue(placement, 'opacity')
+    };
+    const syncRange = (id, value, suffix) => {
+        const input = document.getElementById(id);
+        const output = document.getElementById(`${id}-value`);
+        if (input) input.value = value;
+        if (output) output.textContent = `${formatValue(value)}${suffix}`;
+    };
+    syncRange('screenshot-scale', values.scale, '%');
+    syncRange('screenshot-x', values.x, '%');
+    syncRange('screenshot-y', values.y, '%');
+    syncRange('screenshot-rotation', values.rotation, '°');
+    syncRange('screenshot-perspective', values.perspective, '°');
+    syncRange('screenshot-opacity', values.opacity, '%');
+}
+
+function updateDeviceEditorUI(context = getSelectedDeviceContext()) {
+    const list = document.getElementById('device-layer-list');
+    const sourceSelect = document.getElementById('device-source-select');
+    if (!list || !sourceSelect) return;
+    const screenshot = context?.screenshot;
+    if (!screenshot) {
+        list.innerHTML = '';
+        sourceSelect.innerHTML = '';
+        return;
+    }
+
+    const devices = screenshot.devices || [];
+    const use3D = screenshot.screenshot.use3D === true;
+    const contexts = devices.length
+        ? devices.map((device, deviceIndex) => ({ screenshot, screenIndex: state.selectedIndex, device, deviceIndex, isBase: false, id: device.id }))
+        : [context];
+    document.getElementById('device-layer-count').textContent = String(contexts.length);
+    list.innerHTML = contexts.map(item => {
+        const label = getDeviceEditorLabel(item);
+        const active = item.id === context.id;
+        const hidden = !item.isBase && item.device.hidden === true;
+        return `<div class="device-layer-item${active ? ' active' : ''}" role="option" tabindex="0" aria-selected="${active}" data-device-id="${escapeInspectorText(item.id)}">
+            <span class="device-layer-glyph" aria-hidden="true"></span>
+            <span class="device-layer-copy"><strong>${escapeInspectorText(label.title)}</strong><small>${escapeInspectorText(label.source)}</small></span>
+            <span class="device-layer-meta">${label.badge ? `<span class="device-role-badge">${escapeInspectorText(label.badge)}</span>` : ''}${item.isBase ? '' : `<button type="button" class="device-visibility-btn${hidden ? ' is-hidden' : ''}" aria-label="${hidden ? 'Show' : 'Hide'} ${escapeInspectorText(label.title)}" title="${use3D ? 'Switch to 2D to change layer visibility' : hidden ? 'Show device' : 'Hide device'}"${use3D ? ' disabled' : ''}>${hidden ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 4.2A10.5 10.5 0 0 1 12 4c5.5 0 9 8 9 8a16.8 16.8 0 0 1-2.1 3.2M6.6 6.6C4.3 8.2 3 12 3 12s3.5 8 9 8a9.8 9.8 0 0 0 3.4-.6"/></svg>' : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12s3.5-8 9-8 9 8 9 8-3.5 8-9 8-9-8-9-8Z"/><circle cx="12" cy="12" r="2.5"/></svg>'}</button>`}</span>
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('.device-layer-item').forEach(item => {
+        const selectItem = () => {
+            if (item.dataset.deviceId !== 'base-device') selectedDeviceId = item.dataset.deviceId;
+            syncDevicePlacementControls();
+            updateDeviceEditorUI();
+            updateCanvas();
+        };
+        item.addEventListener('click', event => {
+            if (event.target.closest('.device-visibility-btn')) return;
+            selectItem();
+        });
+        item.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            selectItem();
+        });
+        item.querySelector('.device-visibility-btn')?.addEventListener('click', event => {
+            event.stopPropagation();
+            if (use3D) return;
+            const targetDevice = devices.find(device => device.id === item.dataset.deviceId);
+            if (!targetDevice) return;
+            const targetContext = contexts.find(candidate => candidate.id === targetDevice.id);
+            const targetLabel = getDeviceEditorLabel(targetContext).title;
+            captureTemplateSnapshot([state.selectedIndex]);
+            targetDevice.hidden = !targetDevice.hidden;
+            selectedDeviceId = targetDevice.id;
+            finishDeviceStructureChange(`${targetLabel} ${targetDevice.hidden ? 'hidden' : 'shown'}.`);
+        });
+    });
+
+    const sourceIndex = context.isBase ? state.selectedIndex : getDeviceSourceIndex(state.selectedIndex, context.device);
+    sourceSelect.innerHTML = state.screenshots.map((candidate, index) =>
+        `<option value="${escapeInspectorText(candidate.id)}">Screen ${index + 1} · ${escapeInspectorText(candidate.name || 'Untitled')}</option>`).join('');
+    sourceSelect.value = sourceIndex >= 0 ? state.screenshots[sourceIndex].id : '';
+    sourceSelect.disabled = use3D;
+    sourceSelect.title = use3D ? 'Switch to 2D to choose another screen' : 'Choose the screenshot shown inside this device';
+
+    const addButton = document.getElementById('device-add-btn');
+    const duplicateButton = document.getElementById('device-duplicate-btn');
+    const backwardButton = document.getElementById('device-backward-btn');
+    const forwardButton = document.getElementById('device-forward-btn');
+    const removeButton = document.getElementById('device-remove-btn');
+    const layerEditTitle = 'Switch to 2D to edit device layers';
+    if (addButton) {
+        addButton.disabled = use3D;
+        addButton.title = use3D ? layerEditTitle : 'Add another device';
+    }
+    if (duplicateButton) {
+        duplicateButton.disabled = use3D;
+        duplicateButton.title = use3D ? layerEditTitle : 'Duplicate selected device';
+    }
+    if (backwardButton) {
+        backwardButton.disabled = use3D || context.isBase || context.deviceIndex <= 0;
+        backwardButton.title = use3D ? layerEditTitle : 'Send selected device backward';
+    }
+    if (forwardButton) {
+        forwardButton.disabled = use3D || context.isBase || context.deviceIndex >= devices.length - 1;
+        forwardButton.title = use3D ? layerEditTitle : 'Bring selected device forward';
+    }
+    if (removeButton) {
+        removeButton.disabled = use3D || context.isBase || devices.length <= 1;
+        removeButton.title = use3D
+            ? layerEditTitle
+            : devices.length <= 1
+                ? 'At least one device stays on the screen'
+                : 'Remove selected device';
+    }
+
+    const linkedPlacements = context.isBase ? [] : getPlacementLinkContexts(context.device.placementLinkId);
+    const seamToggle = document.getElementById('device-seam-toggle');
+    if (seamToggle) {
+        const showSeamToggle = linkedPlacements.length > 1;
+        const isLocked = context.device.seamLocked !== false;
+        seamToggle.hidden = !showSeamToggle;
+        seamToggle.setAttribute('aria-pressed', String(isLocked));
+        seamToggle.querySelector('.mini-toggle')?.classList.toggle('active', isLocked);
+        const seamDescription = document.getElementById('device-seam-description');
+        if (seamDescription) seamDescription.textContent = isLocked
+            ? `Moves ${linkedPlacements.length} visible halves together`
+            : 'This half moves independently';
+    }
+
+    const label = getDeviceEditorLabel(context);
+    const layoutScope = document.getElementById('device-layout-scope');
+    if (layoutScope) layoutScope.textContent = label.title;
+    const linkedScreens = getLinkedDeviceScreens(screenshot);
+    const appearanceScope = document.getElementById('device-appearance-scope');
+    if (appearanceScope) appearanceScope.textContent = linkedScreens.length > 1
+        ? `Linked screens · ${linkedScreens.length}`
+        : devices.length > 1
+            ? `All devices · ${devices.length}`
+            : 'This screen';
+
+    const hasLinkedLayout = deviceLayoutRequires2D(screenshot, state.selectedIndex);
+    const threeDButton = document.querySelector('#device-type-selector button[data-type="3d"]');
+    if (threeDButton) {
+        threeDButton.disabled = hasLinkedLayout;
+        threeDButton.title = hasLinkedLayout
+            ? devices.some(device => device.hidden === true)
+                ? 'Show the hidden device before switching to 3D'
+                : 'Linked and multi-device layouts use 2D rendering'
+            : 'Use a 3D device model';
+    }
+    const linkedTip = document.getElementById('linked-3d-tip');
+    if (linkedTip) linkedTip.style.display = hasLinkedLayout ? 'flex' : 'none';
+}
+
+function refreshDeviceEditor() {
+    const context = getSelectedDeviceContext();
+    syncDevicePlacementControls(context);
+    updateDeviceEditorUI(context);
+    updateDeviceSelectionOutline();
+}
+
+function getDeviceActionSnapshotIndices(context) {
+    if (!context) return [];
+    const linked = context.isBase ? [] : getPlacementLinkContexts(context.device.placementLinkId);
+    return [...new Set([context.screenIndex, ...linked.map(item => item.screenIndex)])];
+}
+
+function stripDeviceSequenceRole(device) {
+    delete device.placementLinkId;
+    delete device.seamLocked;
+    delete device.continueToNext;
+    delete device.sequenceName;
+    delete device.continuationCycle;
+    delete device.continuationStep;
+    delete device.continuationTextPositions;
+}
+
+function finishDeviceStructureChange(message) {
+    ensureDeviceMetadata();
+    syncUIWithState();
+    updateScreenshotList();
+    updateCanvas();
+    showTemplateToast(message, true);
+}
+
+function addDevicePlacement() {
+    let context = getSelectedDeviceContext();
+    if (!context || context.screenshot.screenshot.use3D) return;
+    captureTemplateSnapshot([context.screenIndex]);
+    if (context.isBase) {
+        ensureBasePlacement(context.screenshot);
+        context = getSelectedDeviceContext();
+    }
+    const placement = createPlacementFromScreenshot(context.screenshot);
+    placement.scale = Math.max(36, Math.min(72, placement.scale * 0.84));
+    placement.x = 64;
+    placement.y = 58;
+    if (placement.positionMode === 'canvas') {
+        placement.centerX = 0.64;
+        placement.centerY = 0.58;
+    }
+    context.screenshot.devices.push(placement);
+    context.screenshot.screenshot.use3D = false;
+    selectedDeviceId = placement.id;
+    finishDeviceStructureChange(`Device ${context.screenshot.devices.length} added.`);
+}
+
+function duplicateSelectedDevice() {
+    let context = getSelectedDeviceContext();
+    if (!context || context.screenshot.screenshot.use3D) return;
+    captureTemplateSnapshot([context.screenIndex]);
+    if (context.isBase) {
+        ensureBasePlacement(context.screenshot);
+        context = getSelectedDeviceContext();
+    }
+    const duplicate = JSON.parse(JSON.stringify(context.device));
+    duplicate.id = crypto.randomUUID();
+    duplicate.editorName = getNextDeviceEditorName(context.screenshot);
+    duplicate.hidden = false;
+    stripDeviceSequenceRole(duplicate);
+    if (duplicate.positionMode === 'canvas') {
+        duplicate.centerX = (duplicate.centerX ?? 0.5) + 0.08;
+        duplicate.centerY = (duplicate.centerY ?? 0.5) + 0.03;
+        duplicate.x = duplicate.centerX * 100;
+        duplicate.y = duplicate.centerY * 100;
+    } else {
+        duplicate.x = Math.min(360, (duplicate.x ?? 50) + 10);
+        duplicate.y = Math.min(180, (duplicate.y ?? 50) + 4);
+    }
+    context.screenshot.devices.splice(context.deviceIndex + 1, 0, duplicate);
+    context.screenshot.screenshot.use3D = false;
+    selectedDeviceId = duplicate.id;
+    finishDeviceStructureChange('Device duplicated.');
+}
+
+function moveSelectedDeviceLayer(direction) {
+    const context = getSelectedDeviceContext();
+    if (!context || context.isBase || context.screenshot.screenshot.use3D) return;
+    const targetIndex = context.deviceIndex + direction;
+    if (targetIndex < 0 || targetIndex >= context.screenshot.devices.length) return;
+    captureTemplateSnapshot([context.screenIndex]);
+    const devices = context.screenshot.devices;
+    [devices[context.deviceIndex], devices[targetIndex]] = [devices[targetIndex], devices[context.deviceIndex]];
+    finishDeviceStructureChange(direction > 0 ? 'Device brought forward.' : 'Device sent backward.');
+}
+
+function removeSelectedDevice() {
+    const context = getSelectedDeviceContext();
+    if (!context || context.isBase || context.screenshot.screenshot.use3D
+        || (context.screenshot.devices || []).length <= 1) return;
+    captureTemplateSnapshot(getDeviceActionSnapshotIndices(context));
+    if (context.device.placementLinkId) clearPlacementLink(context.device.placementLinkId);
+    context.screenshot.devices.splice(context.deviceIndex, 1);
+    selectedDeviceId = null;
+    const remainingPrimary = context.screenshot.devices.find(device => isCurrentScreenshotDevice(context.screenshot, device));
+    if (remainingPrimary) syncPrimaryDeviceSettings(context.screenshot, remainingPrimary);
+    finishDeviceStructureChange('Device removed.');
+}
+
+function changeSelectedDeviceSource(sourceScreenshotId) {
+    let context = getSelectedDeviceContext();
+    const sourceIndex = state.screenshots.findIndex(screenshot => screenshot.id === sourceScreenshotId);
+    if (!context || sourceIndex < 0 || context.screenshot.screenshot.use3D) return;
+    captureTemplateSnapshot(getDeviceActionSnapshotIndices(context));
+    if (context.isBase) {
+        ensureBasePlacement(context.screenshot);
+        context = getSelectedDeviceContext();
+    }
+    if (context.device.placementLinkId) clearPlacementLink(context.device.placementLinkId);
+    context.device.sourceScreenshotId = sourceScreenshotId;
+    context.device.sourceOffset = sourceIndex - context.screenIndex;
+    if (sourceScreenshotId !== context.screenshot.id) stripDeviceSequenceRole(context.device);
+    syncPrimaryDeviceSettings(context.screenshot, context.device);
+    finishDeviceStructureChange(`Device now uses screen ${sourceIndex + 1}.`);
+}
+
+function toggleSelectedDeviceSeam() {
+    const context = getSelectedDeviceContext();
+    if (!context?.device?.placementLinkId) return;
+    const linked = getPlacementLinkContexts(context.device.placementLinkId);
+    if (linked.length < 2) return;
+    captureTemplateSnapshot(linked.map(item => item.screenIndex));
+    const shouldLock = context.device.seamLocked === false;
+    linked.forEach(item => { item.device.seamLocked = shouldLock; });
+    if (shouldLock) {
+        ['x', 'y', 'scale', 'rotation', 'perspective', 'opacity'].forEach(key => {
+            setSelectedDeviceSetting(key, getPlacementControlValue(context.device, key));
+        });
+    }
+    finishDeviceStructureChange(shouldLock ? 'Seam alignment restored.' : 'Seam unlocked for individual editing.');
 }
 
 function setTextSetting(key, value) {
@@ -1441,6 +2537,178 @@ const canvasWrapper = document.getElementById('canvas-wrapper');
 let isSliding = false;
 let skipSidePreviewRender = false;  // Flag to skip re-rendering side previews after pre-render
 
+function getDeviceLayoutMetrics(dims, img, settings) {
+    if (!img || !dims || !settings) return null;
+    const scale = (settings.scale ?? 70) / 100;
+    let width = dims.width * scale;
+    let height = (img.height / img.width) * width;
+    if (height > dims.height * scale) {
+        height = dims.height * scale;
+        width = (img.width / img.height) * height;
+    }
+    const moveX = Math.max(dims.width - width, dims.width * 0.15);
+    const moveY = Math.max(dims.height - height, dims.height * 0.15);
+    let centerX;
+    let centerY;
+    if (settings.positionMode === 'canvas' && Number.isFinite(settings.centerX) && Number.isFinite(settings.centerY)) {
+        centerX = dims.width * settings.centerX;
+        centerY = dims.height * settings.centerY;
+    } else {
+        const x = (dims.width - width) / 2 + ((settings.x ?? 50) / 100 - 0.5) * moveX;
+        const y = (dims.height - height) / 2 + ((settings.y ?? 50) / 100 - 0.5) * moveY;
+        centerX = x + width / 2;
+        centerY = y + height / 2;
+    }
+    return { width, height, centerX, centerY, x: centerX - width / 2, y: centerY - height / 2, moveX, moveY };
+}
+
+function updateDeviceSelectionOutline() {
+    const outline = document.getElementById('device-selection-outline');
+    const labelElement = document.getElementById('device-selection-label');
+    if (!outline || !canvas) return;
+    const hideSelection = () => {
+        outline.hidden = true;
+        if (labelElement) labelElement.hidden = true;
+    };
+    const context = getSelectedDeviceContext();
+    const deviceTabActive = document.getElementById('tab-screenshot')?.classList.contains('active');
+    if (!context || !deviceTabActive || context.screenshot.screenshot.use3D || context.device.hidden) {
+        hideSelection();
+        canvas.style.cursor = '';
+        return;
+    }
+    const image = context.isBase
+        ? getScreenshotImage(context.screenshot)
+        : getDeviceSourceImage(context.screenIndex, context.device, getScreenshotImage(context.screenshot));
+    const settings = context.isBase
+        ? context.screenshot.screenshot
+        : getDeviceRenderSettings(context.screenshot.screenshot, context.device);
+    const dims = getCanvasDimensions();
+    const metrics = getDeviceLayoutMetrics(dims, image, settings);
+    if (!metrics || !canvas.clientWidth || !canvas.clientHeight) {
+        hideSelection();
+        return;
+    }
+    const scaleX = canvas.clientWidth / dims.width;
+    const scaleY = canvas.clientHeight / dims.height;
+    const outlineLeft = metrics.x * scaleX;
+    const outlineTop = metrics.y * scaleY;
+    const outlineWidth = metrics.width * scaleX;
+    const outlineHeight = metrics.height * scaleY;
+    outline.style.left = `${outlineLeft}px`;
+    outline.style.top = `${outlineTop}px`;
+    outline.style.width = `${outlineWidth}px`;
+    outline.style.height = `${outlineHeight}px`;
+    const shear = Math.atan((settings.perspective || 0) * 0.01) * 180 / Math.PI;
+    outline.style.transform = `rotate(${settings.rotation || 0}deg) skewY(${shear}deg)`;
+    outline.style.borderRadius = `${Math.max(4, (settings.cornerRadius || 0) * scaleX)}px`;
+    outline.hidden = false;
+    if (labelElement) {
+        const visibleLeft = Math.max(0, outlineLeft);
+        const visibleTop = Math.max(0, outlineTop);
+        const visibleRight = Math.min(canvas.clientWidth, outlineLeft + outlineWidth);
+        const visibleBottom = Math.min(canvas.clientHeight, outlineTop + outlineHeight);
+        const hasVisibleIntersection = visibleRight > visibleLeft && visibleBottom > visibleTop;
+        labelElement.textContent = getDeviceEditorLabel(context).title;
+        labelElement.hidden = !hasVisibleIntersection;
+        if (hasVisibleIntersection) {
+            labelElement.style.maxWidth = `${Math.max(40, canvas.clientWidth - 12)}px`;
+            const labelWidth = labelElement.offsetWidth || 90;
+            const labelHeight = labelElement.offsetHeight || 20;
+            const preferredLeft = visibleLeft + 6;
+            const preferredTop = visibleTop + 6;
+            labelElement.style.left = `${Math.max(6, Math.min(canvas.clientWidth - labelWidth - 6, preferredLeft))}px`;
+            labelElement.style.top = `${Math.max(6, Math.min(canvas.clientHeight - labelHeight - 6, preferredTop))}px`;
+        }
+    }
+    canvas.style.cursor = draggingDevice ? 'grabbing' : 'grab';
+}
+
+function getDeviceContextAtCanvasPoint(point) {
+    const screenshot = getCurrentScreenshot();
+    if (!screenshot || screenshot.screenshot.use3D) return null;
+    ensureDeviceMetadata();
+    const contexts = (screenshot.devices || []).length
+        ? screenshot.devices.map((device, deviceIndex) => ({ screenshot, screenIndex: state.selectedIndex, device, deviceIndex, isBase: false, id: device.id }))
+        : [getSelectedDeviceContext()];
+    const dims = getCanvasDimensions();
+    for (let index = contexts.length - 1; index >= 0; index -= 1) {
+        const context = contexts[index];
+        if (!context || context.device.hidden) continue;
+        const image = context.isBase
+            ? getScreenshotImage(screenshot)
+            : getDeviceSourceImage(state.selectedIndex, context.device, getScreenshotImage(screenshot));
+        const settings = context.isBase ? screenshot.screenshot : getDeviceRenderSettings(screenshot.screenshot, context.device);
+        const metrics = getDeviceLayoutMetrics(dims, image, settings);
+        if (!metrics) continue;
+        const angle = -((settings.rotation || 0) * Math.PI / 180);
+        const deltaX = point.x - metrics.centerX;
+        const deltaY = point.y - metrics.centerY;
+        const localX = deltaX * Math.cos(angle) - deltaY * Math.sin(angle);
+        const rotatedY = deltaX * Math.sin(angle) + deltaY * Math.cos(angle);
+        const localY = rotatedY - (settings.perspective || 0) * 0.01 * localX;
+        if (Math.abs(localX) <= metrics.width / 2 && Math.abs(localY) <= metrics.height / 2) {
+            return { ...context, metrics };
+        }
+    }
+    return null;
+}
+
+function getCanvasPointerPosition(event) {
+    const rect = canvas.getBoundingClientRect();
+    const dims = getCanvasDimensions();
+    return {
+        x: (event.clientX - rect.left) * dims.width / rect.width,
+        y: (event.clientY - rect.top) * dims.height / rect.height
+    };
+}
+
+canvas.addEventListener('pointerdown', event => {
+    if (!document.getElementById('tab-screenshot')?.classList.contains('active')) return;
+    const point = getCanvasPointerPosition(event);
+    const context = getDeviceContextAtCanvasPoint(point);
+    if (!context) return;
+    event.preventDefault();
+    if (!context.isBase) selectedDeviceId = context.device.id;
+    const selected = getSelectedDeviceContext();
+    draggingDevice = {
+        pointerId: event.pointerId,
+        startPoint: point,
+        startX: getPlacementControlValue(selected.device, 'x'),
+        startY: getPlacementControlValue(selected.device, 'y'),
+        metrics: context.metrics,
+        canvasPosition: selected.device.positionMode === 'canvas'
+    };
+    canvas.setPointerCapture(event.pointerId);
+    canvasWrapper.classList.add('is-device-dragging');
+    refreshDeviceEditor();
+    updateCanvas();
+});
+
+canvas.addEventListener('pointermove', event => {
+    if (!draggingDevice || draggingDevice.pointerId !== event.pointerId) return;
+    const point = getCanvasPointerPosition(event);
+    const dims = getCanvasDimensions();
+    const xRange = draggingDevice.canvasPosition ? dims.width : draggingDevice.metrics.moveX;
+    const yRange = draggingDevice.canvasPosition ? dims.height : draggingDevice.metrics.moveY;
+    const nextX = draggingDevice.startX + (point.x - draggingDevice.startPoint.x) / xRange * 100;
+    const nextY = draggingDevice.startY + (point.y - draggingDevice.startPoint.y) / yRange * 100;
+    setSelectedDeviceSetting('x', Math.max(-360, Math.min(360, nextX)));
+    setSelectedDeviceSetting('y', Math.max(-80, Math.min(180, nextY)));
+    syncDevicePlacementControls();
+    updateCanvas();
+});
+
+const finishDeviceDrag = event => {
+    if (!draggingDevice || (event && draggingDevice.pointerId !== event.pointerId)) return;
+    if (event && canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    draggingDevice = null;
+    canvasWrapper.classList.remove('is-device-dragging');
+    updateDeviceSelectionOutline();
+};
+canvas.addEventListener('pointerup', finishDeviceDrag);
+canvas.addEventListener('pointercancel', finishDeviceDrag);
+
 // Two-finger horizontal swipe to navigate between screenshots
 let swipeAccumulator = 0;
 const SWIPE_THRESHOLD = 50; // Minimum accumulated delta to trigger navigation
@@ -1814,6 +3082,7 @@ function saveState() {
         }
 
         return {
+            id: s.id || crypto.randomUUID(),
             src: s.image?.src || '', // Legacy compatibility
             name: s.name,
             deviceType: s.deviceType,
@@ -1986,6 +3255,7 @@ function loadState() {
                                     migrate3DPosition(screenshotSettings);
                                 }
                                 state.screenshots[index] = {
+                                    id: s.id || crypto.randomUUID(),
                                     image: null,
                                     name: s.name || 'Blank Screen',
                                     deviceType: s.deviceType,
@@ -1995,6 +3265,7 @@ function loadState() {
                                     text: s.text || JSON.parse(JSON.stringify(migratedText)),
                                     elements: reconstructElementImages(s.elements),
                                     popouts: s.popouts || [],
+                                    devices: JSON.parse(JSON.stringify(s.devices || [])),
                                     overrides: s.overrides || {}
                                 };
                                 loadedCount++;
@@ -2025,6 +3296,7 @@ function loadState() {
                                                     migrate3DPosition(screenshotSettings);
                                                 }
                                                 state.screenshots[index] = {
+                                                    id: s.id || crypto.randomUUID(),
                                                     image: localizedImages[firstLang]?.image, // Legacy compat
                                                     name: s.name,
                                                     deviceType: s.deviceType,
@@ -2034,6 +3306,7 @@ function loadState() {
                                                     text: s.text || JSON.parse(JSON.stringify(migratedText)),
                                                     elements: reconstructElementImages(s.elements),
                                                     popouts: s.popouts || [],
+                                                    devices: JSON.parse(JSON.stringify(s.devices || [])),
                                                     overrides: s.overrides || {}
                                                 };
                                                 loadedCount++;
@@ -2070,6 +3343,7 @@ function loadState() {
                                         migrate3DPosition(screenshotSettings);
                                     }
                                     state.screenshots[index] = {
+                                        id: s.id || crypto.randomUUID(),
                                         image: img,
                                         name: s.name,
                                         deviceType: s.deviceType,
@@ -2079,6 +3353,7 @@ function loadState() {
                                         text: s.text || JSON.parse(JSON.stringify(migratedText)),
                                         elements: reconstructElementImages(s.elements),
                                         popouts: s.popouts || [],
+                                        devices: JSON.parse(JSON.stringify(s.devices || [])),
                                         overrides: s.overrides || {}
                                     };
                                     loadedCount++;
@@ -2202,6 +3477,7 @@ function resetStateToDefaults() {
             x: 50,
             rotation: 0,
             perspective: 0,
+            opacity: 100,
             cornerRadius: 24,
             shadow: {
                 enabled: true,
@@ -2388,6 +3664,18 @@ function duplicateScreenshot(index) {
         text: original.text,
         overrides: original.overrides
     }));
+    clone.id = crypto.randomUUID();
+    clone.elements = cloneTemplateElements(original.elements || []).map(element => ({ ...element, id: crypto.randomUUID() }));
+    clone.popouts = JSON.parse(JSON.stringify(original.popouts || [])).map(popout => ({ ...popout, id: crypto.randomUUID() }));
+    clone.devices = JSON.parse(JSON.stringify(original.devices || [])).map(device => {
+        device.id = crypto.randomUUID();
+        if (device.sourceScreenshotId === original.id || (device.sourceOffset ?? 0) === 0) {
+            device.sourceScreenshotId = clone.id;
+            device.sourceOffset = 0;
+        }
+        stripDeviceSequenceRole(device);
+        return device;
+    });
 
     const nameParts = clone.name.split('.');
     if (nameParts.length > 1) {
@@ -2420,7 +3708,9 @@ function duplicateScreenshot(index) {
     }
 
     state.screenshots.splice(index + 1, 0, clone);
+    syncDeviceSourceOffsets();
     state.selectedIndex = index + 1;
+    selectedDeviceId = null;
 
     updateScreenshotList();
     syncUIWithState();
@@ -2494,6 +3784,14 @@ function syncUIWithState() {
     document.getElementById('custom-width').value = state.customWidth;
     document.getElementById('custom-height').value = state.customHeight;
 
+    // Persisted projects from older versions can contain a linked layout marked as 3D.
+    // Linked and multi-device compositions render in 2D so every placement stays visible.
+    const currentScreenshot = getCurrentScreenshot();
+    if (currentScreenshot?.screenshot?.use3D
+        && deviceLayoutRequires2D(currentScreenshot, state.selectedIndex)) {
+        currentScreenshot.screenshot.use3D = false;
+    }
+
     // Get current screenshot's settings
     const bg = getBackground();
     const ss = getScreenshotSettings();
@@ -2530,17 +3828,14 @@ function syncUIWithState() {
     document.getElementById('noise-intensity').value = bg.noiseIntensity;
     document.getElementById('noise-intensity-value').textContent = formatValue(bg.noiseIntensity) + '%';
 
-    // Screenshot settings
-    document.getElementById('screenshot-scale').value = ss.scale;
-    document.getElementById('screenshot-scale-value').textContent = formatValue(ss.scale) + '%';
-    document.getElementById('screenshot-y').value = ss.y;
-    document.getElementById('screenshot-y-value').textContent = formatValue(ss.y) + '%';
-    document.getElementById('screenshot-x').value = ss.x;
-    document.getElementById('screenshot-x-value').textContent = formatValue(ss.x) + '%';
+    // Device placement uses the selected 2D device when a template has multiple placements.
+    const selectedDeviceContext = getSelectedDeviceContext();
+    syncDevicePlacementControls(selectedDeviceContext);
+    updateDeviceEditorUI(selectedDeviceContext);
+
+    // Shared device appearance
     document.getElementById('corner-radius').value = ss.cornerRadius;
     document.getElementById('corner-radius-value').textContent = formatValue(ss.cornerRadius) + 'px';
-    document.getElementById('screenshot-rotation').value = ss.rotation;
-    document.getElementById('screenshot-rotation-value').textContent = formatValue(ss.rotation) + '°';
 
     // Shadow
     document.getElementById('shadow-toggle').classList.toggle('active', ss.shadow.enabled);
@@ -3947,6 +5242,8 @@ function setupPopoutEventListeners() {
 }
 
 function setupEventListeners() {
+    const templateCount = document.querySelector('#open-templates-btn .template-count');
+    if (templateCount && typeof APP_TEMPLATES !== 'undefined') templateCount.textContent = APP_TEMPLATES.length;
     document.getElementById('open-templates-btn')?.addEventListener('click', openTemplateGallery);
     document.getElementById('undo-template-btn')?.addEventListener('click', undoLastTemplate);
     const closeVisibleModalOverlays = () => {
@@ -3982,10 +5279,6 @@ function setupEventListeners() {
     // Add blank screen button
     document.getElementById('add-blank-btn').addEventListener('click', () => {
         createNewScreenshot(null, null, 'Blank Screen', null, state.outputDevice);
-        state.selectedIndex = state.screenshots.length - 1;
-        updateScreenshotList();
-        syncUIWithState();
-        updateGradientStopsUI();
         updateCanvas();
     });
 
@@ -4517,7 +5810,8 @@ function setupEventListeners() {
             content.classList.toggle('active', isActive);
             content.hidden = !isActive;
         });
-        localStorage.setItem('activeTab', tab.dataset.tab);
+        try { localStorage.setItem('activeTab', tab.dataset.tab); } catch (_) { /* Storage can be blocked in private previews. */ }
+        updateDeviceSelectionOutline();
         if (moveFocus) tab.focus();
     };
 
@@ -4551,7 +5845,8 @@ function setupEventListeners() {
     });
 
     // Restore active tab from localStorage
-    const savedTab = localStorage.getItem('activeTab');
+    let savedTab = null;
+    try { savedTab = localStorage.getItem('activeTab'); } catch (_) { /* Use the default tab. */ }
     if (savedTab) {
         const tabBtn = document.querySelector(`.tab[data-tab="${savedTab}"]`);
         if (tabBtn) {
@@ -4748,19 +6043,19 @@ function setupEventListeners() {
 
     // Screenshot settings
     document.getElementById('screenshot-scale').addEventListener('input', (e) => {
-        setScreenshotSetting('scale', parseInt(e.target.value));
+        setSelectedDeviceSetting('scale', parseInt(e.target.value));
         document.getElementById('screenshot-scale-value').textContent = formatValue(e.target.value) + '%';
         updateCanvas();
     });
 
     document.getElementById('screenshot-y').addEventListener('input', (e) => {
-        setScreenshotSetting('y', parseInt(e.target.value));
+        setSelectedDeviceSetting('y', parseFloat(e.target.value));
         document.getElementById('screenshot-y-value').textContent = formatValue(e.target.value) + '%';
         updateCanvas();
     });
 
     document.getElementById('screenshot-x').addEventListener('input', (e) => {
-        setScreenshotSetting('x', parseInt(e.target.value));
+        setSelectedDeviceSetting('x', parseFloat(e.target.value));
         document.getElementById('screenshot-x-value').textContent = formatValue(e.target.value) + '%';
         updateCanvas();
     });
@@ -4772,10 +6067,30 @@ function setupEventListeners() {
     });
 
     document.getElementById('screenshot-rotation').addEventListener('input', (e) => {
-        setScreenshotSetting('rotation', parseInt(e.target.value));
+        setSelectedDeviceSetting('rotation', parseInt(e.target.value));
         document.getElementById('screenshot-rotation-value').textContent = formatValue(e.target.value) + '°';
         updateCanvas();
     });
+
+    document.getElementById('screenshot-perspective').addEventListener('input', (e) => {
+        setSelectedDeviceSetting('perspective', parseInt(e.target.value));
+        document.getElementById('screenshot-perspective-value').textContent = formatValue(e.target.value) + '°';
+        updateCanvas();
+    });
+
+    document.getElementById('screenshot-opacity').addEventListener('input', (e) => {
+        setSelectedDeviceSetting('opacity', parseInt(e.target.value));
+        document.getElementById('screenshot-opacity-value').textContent = formatValue(e.target.value) + '%';
+        updateCanvas();
+    });
+
+    document.getElementById('device-add-btn').addEventListener('click', addDevicePlacement);
+    document.getElementById('device-duplicate-btn').addEventListener('click', duplicateSelectedDevice);
+    document.getElementById('device-backward-btn').addEventListener('click', () => moveSelectedDeviceLayer(-1));
+    document.getElementById('device-forward-btn').addEventListener('click', () => moveSelectedDeviceLayer(1));
+    document.getElementById('device-remove-btn').addEventListener('click', removeSelectedDevice);
+    document.getElementById('device-source-select').addEventListener('change', (e) => changeSelectedDeviceSource(e.target.value));
+    document.getElementById('device-seam-toggle').addEventListener('click', toggleSelectedDeviceSeam);
 
     // Shadow toggle
     document.getElementById('shadow-toggle').addEventListener('click', function () {
@@ -4797,6 +6112,14 @@ function setupEventListeners() {
         setScreenshotSetting('shadow.color', e.target.value);
         document.getElementById('shadow-color-hex').value = e.target.value;
         updateCanvas();
+    });
+
+    document.getElementById('shadow-color-hex').addEventListener('input', (e) => {
+        if (/^#[0-9A-Fa-f]{6}$/.test(e.target.value)) {
+            setScreenshotSetting('shadow.color', e.target.value);
+            document.getElementById('shadow-color').value = e.target.value;
+            updateCanvas();
+        }
     });
 
     document.getElementById('shadow-blur').addEventListener('input', (e) => {
@@ -5104,10 +6427,13 @@ function setupEventListeners() {
     // Device type selector (2D/3D)
     document.querySelectorAll('#device-type-selector button').forEach(btn => {
         btn.addEventListener('click', () => {
+            const use3D = btn.dataset.type === '3d';
+            const screenshot = getCurrentScreenshot();
+            if (use3D && deviceLayoutRequires2D(screenshot, state.selectedIndex)) return;
+
             document.querySelectorAll('#device-type-selector button').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
 
-            const use3D = btn.dataset.type === '3d';
             setScreenshotSetting('use3D', use3D);
             document.getElementById('rotation-3d-options').style.display = use3D ? 'block' : 'none';
 
@@ -5125,6 +6451,7 @@ function setupEventListeners() {
                 updateScreenTexture();
             }
 
+            refreshDeviceEditor();
             updateCanvas();
         });
     });
@@ -6680,11 +8007,11 @@ function applyPositionPreset(preset) {
     const p = presets[preset];
     if (!p) return;
 
-    setScreenshotSetting('scale', p.scale);
-    setScreenshotSetting('x', p.x);
-    setScreenshotSetting('y', p.y);
-    setScreenshotSetting('rotation', p.rotation);
-    setScreenshotSetting('perspective', p.perspective);
+    setSelectedDeviceSetting('scale', p.scale);
+    setSelectedDeviceSetting('x', p.x);
+    setSelectedDeviceSetting('y', p.y);
+    setSelectedDeviceSetting('rotation', p.rotation);
+    setSelectedDeviceSetting('perspective', p.perspective);
 
     // Update UI controls
     document.getElementById('screenshot-scale').value = p.scale;
@@ -6695,6 +8022,8 @@ function applyPositionPreset(preset) {
     document.getElementById('screenshot-y-value').textContent = formatValue(p.y) + '%';
     document.getElementById('screenshot-rotation').value = p.rotation;
     document.getElementById('screenshot-rotation-value').textContent = formatValue(p.rotation) + '°';
+    document.getElementById('screenshot-perspective').value = p.perspective;
+    document.getElementById('screenshot-perspective-value').textContent = formatValue(p.perspective) + '°';
 
     updateCanvas();
 }
@@ -6901,6 +8230,7 @@ function createNewScreenshot(img, src, name, lang, deviceType) {
 
     // Each screenshot gets its own copy of all settings from defaults
     state.screenshots.push({
+        id: crypto.randomUUID(),
         image: img || null, // Keep for legacy compatibility
         name: name || 'Blank Screen',
         deviceType: deviceType,
@@ -6915,13 +8245,20 @@ function createNewScreenshot(img, src, name, lang, deviceType) {
         overrides: {}
     });
 
-    state.selectedIndex = state.screenshots.length - 1;
+    const newScreenshotIndex = state.screenshots.length - 1;
+    state.selectedIndex = newScreenshotIndex;
+    const sequenceExtension = continueSequenceOntoScreenshot(newScreenshotIndex - 1, newScreenshotIndex);
 
     updateScreenshotList();
+    syncUIWithState();
+    updateGradientStopsUI();
     if (state.screenshots.length === 1) {
         state.selectedIndex = 0;
         // Show Magical Titles tooltip hint for first screenshot
         setTimeout(() => showMagicalTitlesTooltip(), 500);
+    }
+    if (sequenceExtension) {
+        showTemplateToast(`Screen ${newScreenshotIndex + 1} added and continued ${sequenceExtension.sequenceName}.`, true);
     }
 }
 
@@ -7049,6 +8386,24 @@ function updateScreenshotList() {
             const checkmark = isComplete ? '<span class="screenshot-complete">✓</span>' : '';
             langFlagsHtml = `<span class="screenshot-lang-flags">${flags}${checkmark}</span>`;
         }
+        const incomingSequenceDevice = (screenshot.devices || []).find(device =>
+            (Number.isFinite(device.sourceOffset) && device.sourceOffset < 0)
+            || (device.sourceScreenshotId && device.sourceScreenshotId !== screenshot.id));
+        const storedSourceIndex = incomingSequenceDevice?.sourceScreenshotId
+            ? state.screenshots.findIndex(candidate => candidate.id === incomingSequenceDevice.sourceScreenshotId)
+            : -1;
+        const linkedSourceIndex = storedSourceIndex >= 0
+            ? storedSourceIndex
+            : incomingSequenceDevice && Number.isFinite(incomingSequenceDevice.sourceOffset)
+                ? index + incomingSequenceDevice.sourceOffset
+                : -1;
+        const sequenceLinkLabel = linkedSourceIndex >= 0 ? `Continues ${linkedSourceIndex + 1}` : 'Linked';
+        const sequenceLinkTitle = linkedSourceIndex >= 0
+            ? `Continues a device from screen ${linkedSourceIndex + 1}`
+            : 'Continues a device from another screen';
+        const sequenceLinkHtml = incomingSequenceDevice
+            ? `<span class="sequence-link-badge" title="${sequenceLinkTitle}">${sequenceLinkLabel}</span>`
+            : '';
 
         const thumbHtml = isBlank
             ? `<div class="screenshot-thumb blank-thumb">
@@ -7069,7 +8424,7 @@ function updateScreenshotList() {
             ${thumbHtml}
             <div class="screenshot-info">
                 <div class="screenshot-name">${screenshot.name}</div>
-                <div class="screenshot-device">${isTransferTarget ? `Click source to copy ${state.transferType === 'device' ? 'device' : 'style'}` : screenshot.deviceType}${langFlagsHtml}</div>
+                <div class="screenshot-device">${isTransferTarget ? `Click source to copy ${state.transferType === 'device' ? 'device' : 'style'}` : screenshot.deviceType}${langFlagsHtml}${sequenceLinkHtml}</div>
             </div>
             ${buttonsHtml}
         `;
@@ -7161,7 +8516,9 @@ function updateScreenshotList() {
                     state.selectedIndex++;
                 }
 
+                syncDeviceSourceOffsets();
                 updateScreenshotList();
+                syncUIWithState();
                 updateCanvas();
             }
         });
@@ -7279,7 +8636,14 @@ function updateScreenshotList() {
             deleteBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 menu?.classList.remove('open');
-                state.screenshots.splice(index, 1);
+                const [removedScreenshot] = state.screenshots.splice(index, 1);
+                if (removedScreenshot?.id) {
+                    state.screenshots.forEach(screenshot => {
+                        screenshot.devices = (screenshot.devices || [])
+                            .filter(device => device.sourceScreenshotId !== removedScreenshot.id);
+                    });
+                }
+                syncDeviceSourceOffsets();
                 if (state.selectedIndex >= state.screenshots.length) {
                     state.selectedIndex = Math.max(0, state.screenshots.length - 1);
                 }
@@ -7292,6 +8656,17 @@ function updateScreenshotList() {
 
         screenshotList.appendChild(item);
     });
+
+    const continuationHint = document.getElementById('sequence-continuation-hint');
+    if (continuationHint) {
+        const tailIndex = state.screenshots.length - 1;
+        const tailOutgoingDevices = getSequenceOutgoingDevices(state.screenshots[tailIndex], tailIndex);
+        continuationHint.hidden = tailOutgoingDevices.length === 0;
+        const hintText = continuationHint.querySelector('span');
+        if (hintText && tailOutgoingDevices.length) {
+            hintText.textContent = `Add a screenshot or blank screen to continue ${tailOutgoingDevices[0].sequenceName || 'this layout'}`;
+        }
+    }
 
     // Hide add buttons during transfer mode
     const addButtonsContainer = document.querySelector('.sidebar-add-buttons');
@@ -7321,11 +8696,20 @@ function transferDeviceConfiguration(sourceIndex, targetIndex) {
     // Copy device placement, frame, shadow, 2D/3D mode, and multi-device layout.
     // Preserve the target screenshot image, background, copy, elements, and popouts.
     target.screenshot = JSON.parse(JSON.stringify(source.screenshot));
-    target.devices = JSON.parse(JSON.stringify(source.devices || []));
+    target.devices = JSON.parse(JSON.stringify(source.devices || [])).map(device => {
+        device.id = crypto.randomUUID();
+        if (device.sourceScreenshotId === source.id || (device.sourceOffset ?? 0) === 0) {
+            device.sourceScreenshotId = target.id;
+            device.sourceOffset = 0;
+        }
+        stripDeviceSequenceRole(device);
+        return device;
+    });
 
     state.transferTarget = null;
     state.transferType = 'style';
     state.selectedIndex = targetIndex;
+    selectedDeviceId = null;
 
     updateScreenshotList();
     syncUIWithState();
@@ -7608,6 +8992,7 @@ function getCanvasDimensions() {
 
 function updateCanvas() {
     updateProofingMeta();
+    normalizeDeviceRenderingModes();
     saveState(); // Persist state on every update
     const dims = getCanvasDimensions();
     canvas.width = dims.width;
@@ -7649,11 +9034,18 @@ function updateCanvas() {
             renderThreeJSToCanvas(canvas, dims.width, dims.height);
         } else if (!use3D) {
             const devices = screenshot?.devices || [];
-            if (devices.length) devices.forEach(device => {
+            if (devices.length) devices.filter(device => device.hidden !== true).forEach(device => {
+                const deviceImage = getDeviceSourceImage(state.selectedIndex, device, img);
+                if (!deviceImage) return;
                 ctx.save(); ctx.globalAlpha = (device.opacity ?? 100) / 100;
-                drawScreenshotToContext(ctx, dims, img, { ...ss, ...device }); ctx.restore();
+                drawScreenshotToContext(ctx, dims, deviceImage, getDeviceRenderSettings(ss, device)); ctx.restore();
             });
-            else drawScreenshot();
+            else {
+                ctx.save();
+                ctx.globalAlpha = (ss.opacity ?? 100) / 100;
+                drawScreenshot();
+                ctx.restore();
+            }
         }
     }
 
@@ -7671,6 +9063,7 @@ function updateCanvas() {
 
     // Update side previews
     updateSidePreviews();
+    updateDeviceSelectionOutline();
 }
 
 function updateSidePreviews() {
@@ -7894,17 +9287,24 @@ function renderScreenshotToCanvas(index, targetCanvas, targetCtx, dims, previewS
     const settings = screenshot.screenshot;
     const use3D = settings.use3D || false;
 
-    if (img) {
-        if (use3D && typeof renderThreeJSForScreenshot === 'function' && phoneModelLoaded) {
+    if (use3D && img) {
+        if (typeof renderThreeJSForScreenshot === 'function' && phoneModelLoaded) {
             // Render 3D phone model for this specific screenshot
             renderThreeJSForScreenshot(targetCanvas, dims.width, dims.height, index);
-        } else {
-            const devices = screenshot.devices || [];
-            if (devices.length) devices.forEach(device => {
-                targetCtx.save(); targetCtx.globalAlpha = (device.opacity ?? 100) / 100;
-                drawScreenshotToContext(targetCtx, dims, img, { ...settings, ...device }); targetCtx.restore();
-            });
-            else drawScreenshotToContext(targetCtx, dims, img, settings);
+        }
+    } else if (!use3D) {
+        const devices = screenshot.devices || [];
+        if (devices.length) devices.filter(device => device.hidden !== true).forEach(device => {
+            const deviceImage = getDeviceSourceImage(index, device, img);
+            if (!deviceImage) return;
+            targetCtx.save(); targetCtx.globalAlpha = (device.opacity ?? 100) / 100;
+            drawScreenshotToContext(targetCtx, dims, deviceImage, getDeviceRenderSettings(settings, device)); targetCtx.restore();
+        });
+        else if (img) {
+            targetCtx.save();
+            targetCtx.globalAlpha = (settings.opacity ?? 100) / 100;
+            drawScreenshotToContext(targetCtx, dims, img, settings);
+            targetCtx.restore();
         }
     }
 
@@ -8016,13 +9416,24 @@ function drawScreenshotToContext(context, dims, img, settings) {
         imgWidth = (img.width / img.height) * imgHeight;
     }
 
-    // Ensure minimum movement range so position works even at 100% scale
-    const moveX = Math.max(dims.width - imgWidth, dims.width * 0.15);
-    const moveY = Math.max(dims.height - imgHeight, dims.height * 0.15);
-    const x = (dims.width - imgWidth) / 2 + (settings.x / 100 - 0.5) * moveX;
-    const y = (dims.height - imgHeight) / 2 + (settings.y / 100 - 0.5) * moveY;
-    const centerX = x + imgWidth / 2;
-    const centerY = y + imgHeight / 2;
+    let x;
+    let y;
+    let centerX;
+    let centerY;
+    if (settings.positionMode === 'canvas' && Number.isFinite(settings.centerX) && Number.isFinite(settings.centerY)) {
+        centerX = dims.width * settings.centerX;
+        centerY = dims.height * settings.centerY;
+        x = centerX - imgWidth / 2;
+        y = centerY - imgHeight / 2;
+    } else {
+        // Ensure minimum movement range so position works even at 100% scale
+        const moveX = Math.max(dims.width - imgWidth, dims.width * 0.15);
+        const moveY = Math.max(dims.height - imgHeight, dims.height * 0.15);
+        x = (dims.width - imgWidth) / 2 + (settings.x / 100 - 0.5) * moveX;
+        y = (dims.height - imgHeight) / 2 + (settings.y / 100 - 0.5) * moveY;
+        centerX = x + imgWidth / 2;
+        centerY = y + imgHeight / 2;
+    }
 
     context.save();
 
@@ -8096,13 +9507,14 @@ function drawDeviceFrameToContext(context, x, y, width, height, settings) {
     const frameOpacity = settings.frame.opacity / 100;
     const radius = (settings.cornerRadius || 0) * (width / 400) + frameWidth;
 
-    context.globalAlpha = frameOpacity;
+    const inheritedAlpha = context.globalAlpha;
+    context.globalAlpha = inheritedAlpha * frameOpacity;
     context.strokeStyle = frameColor;
     context.lineWidth = frameWidth;
     context.beginPath();
     context.roundRect(x - frameWidth / 2, y - frameWidth / 2, width + frameWidth, height + frameWidth, radius);
     context.stroke();
-    context.globalAlpha = 1;
+    context.globalAlpha = inheritedAlpha;
 }
 
 function drawTextToContext(context, dims, txt) {
@@ -8653,15 +10065,26 @@ function drawScreenshot() {
         imgWidth = (img.width / img.height) * imgHeight;
     }
 
-    // Ensure minimum movement range so position works even at 100% scale
-    const moveX = Math.max(dims.width - imgWidth, dims.width * 0.15);
-    const moveY = Math.max(dims.height - imgHeight, dims.height * 0.15);
-    const x = (dims.width - imgWidth) / 2 + (settings.x / 100 - 0.5) * moveX;
-    const y = (dims.height - imgHeight) / 2 + (settings.y / 100 - 0.5) * moveY;
-
-    // Center point for transformations
-    const centerX = x + imgWidth / 2;
-    const centerY = y + imgHeight / 2;
+    let x;
+    let y;
+    let centerX;
+    let centerY;
+    if (settings.positionMode === 'canvas'
+        && Number.isFinite(settings.centerX)
+        && Number.isFinite(settings.centerY)) {
+        centerX = dims.width * settings.centerX;
+        centerY = dims.height * settings.centerY;
+        x = centerX - imgWidth / 2;
+        y = centerY - imgHeight / 2;
+    } else {
+        // Ensure minimum movement range so position works even at 100% scale.
+        const moveX = Math.max(dims.width - imgWidth, dims.width * 0.15);
+        const moveY = Math.max(dims.height - imgHeight, dims.height * 0.15);
+        x = (dims.width - imgWidth) / 2 + (settings.x / 100 - 0.5) * moveX;
+        y = (dims.height - imgHeight) / 2 + (settings.y / 100 - 0.5) * moveY;
+        centerX = x + imgWidth / 2;
+        centerY = y + imgHeight / 2;
+    }
 
     ctx.save();
 
@@ -8736,13 +10159,14 @@ function drawDeviceFrame(x, y, width, height) {
     const frameOpacity = settings.frame.opacity / 100;
     const radius = settings.cornerRadius * (width / 400) + frameWidth;
 
-    ctx.globalAlpha = frameOpacity;
+    const inheritedAlpha = ctx.globalAlpha;
+    ctx.globalAlpha = inheritedAlpha * frameOpacity;
     ctx.strokeStyle = frameColor;
     ctx.lineWidth = frameWidth;
     ctx.beginPath();
     roundRect(ctx, x - frameWidth / 2, y - frameWidth / 2, width + frameWidth, height + frameWidth, radius);
     ctx.stroke();
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = inheritedAlpha;
 }
 
 function drawText() {

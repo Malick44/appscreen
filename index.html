@@ -22,8 +22,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Geist+Mono:wght@400;500&family=Geist:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=20260903-precision-studio-base">
-    <link rel="stylesheet" href="ui-redesign.css?v=20260903-precision-studio">
+    <link rel="stylesheet" href="styles.css?v=20260904-device-editor-1">
+    <link rel="stylesheet" href="ui-redesign.css?v=20260904-device-editor-1">
 
     <!-- Detect Tauri and add class for native styling -->
     <script>
@@ -242,6 +242,13 @@
                     </svg>
                     Blank Screen
                 </button>
+                <div class="sequence-continuation-hint" id="sequence-continuation-hint" hidden>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2" aria-hidden="true">
+                        <path d="M5 12h14M15 8l4 4-4 4" />
+                    </svg>
+                    <span>Add a screenshot or blank screen to continue this layout</span>
+                </div>
                 <button class="add-btn ai-generate-btn" id="screenshot-ai-generate-btn"
                     title="Generate a device screen image with AI">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -375,6 +382,8 @@
                 </div>
                 <div class="canvas-wrapper" id="canvas-wrapper">
                     <canvas id="preview-canvas"></canvas>
+                    <div class="device-selection-outline" id="device-selection-outline" hidden aria-hidden="true"></div>
+                    <span class="device-selection-label" id="device-selection-label" hidden aria-hidden="true">Device</span>
                     <div id="threejs-container" style="display: none;"></div>
                     <div class="no-screenshot" id="no-screenshot">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
@@ -452,8 +461,8 @@
             <div class="sidebar-content">
                 <!-- Background Tab -->
                 <div class="template-launch-row">
-                    <button class="template-launch-btn" id="open-templates-btn">Templates <span>6</span></button>
-                    <button class="template-undo-btn" id="undo-template-btn" disabled title="Restore the scene from before the last template">Undo</button>
+                    <button class="template-launch-btn" id="open-templates-btn">Templates <span class="template-count">0</span></button>
+                    <button class="template-undo-btn" id="undo-template-btn" disabled title="Undo the last layout change">Undo</button>
                 </div>
                 <div class="tab-content active" id="tab-background">
                     <div class="control-group">
@@ -697,8 +706,63 @@
 
                 <!-- Screenshot Tab -->
                 <div class="tab-content" id="tab-screenshot">
+                    <section class="device-editor-card" id="device-editor-card" aria-labelledby="device-layers-title">
+                        <div class="device-editor-heading">
+                            <div>
+                                <span class="control-label" id="device-layers-title">Devices</span>
+                                <small>Select a device to edit its placement</small>
+                            </div>
+                            <span class="device-count" id="device-layer-count">1</span>
+                        </div>
+                        <div class="device-layer-list" id="device-layer-list" role="listbox"
+                            aria-label="Devices on this screen"></div>
+                        <div class="device-layer-actions" aria-label="Device layer actions">
+                            <button type="button" class="device-action device-action-primary" id="device-add-btn"
+                                title="Add another device">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2"><path d="M12 5v14M5 12h14" /></svg>
+                                Add device
+                            </button>
+                            <button type="button" class="device-action" id="device-duplicate-btn"
+                                title="Duplicate selected device" aria-label="Duplicate selected device">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2"><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></svg>
+                            </button>
+                            <button type="button" class="device-action" id="device-backward-btn"
+                                title="Send selected device backward" aria-label="Send selected device backward">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2"><path d="M12 5v14M7 14l5 5 5-5" /></svg>
+                            </button>
+                            <button type="button" class="device-action" id="device-forward-btn"
+                                title="Bring selected device forward" aria-label="Bring selected device forward">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2"><path d="M12 19V5M7 10l5-5 5 5" /></svg>
+                            </button>
+                            <button type="button" class="device-action device-action-danger" id="device-remove-btn"
+                                title="Remove selected device" aria-label="Remove selected device">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13" /></svg>
+                            </button>
+                        </div>
+                        <label class="device-source-field" for="device-source-select">
+                            <span>Screen content</span>
+                            <select id="device-source-select" aria-label="Screenshot shown inside selected device"></select>
+                        </label>
+                        <button type="button" class="device-seam-control" id="device-seam-toggle" hidden
+                            aria-pressed="true">
+                            <span class="device-seam-icon" aria-hidden="true">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1" /><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1" /></svg>
+                            </span>
+                            <span><strong>Keep seam aligned</strong><small id="device-seam-description">Moves both visible halves together</small></span>
+                            <span class="mini-toggle active" aria-hidden="true"></span>
+                        </button>
+                    </section>
+
+                    <div class="divider"></div>
+
                     <div class="control-group">
-                        <label class="control-label">Device Screen</label>
+                        <label class="control-label">Selected Device Content</label>
                         <button class="add-btn ai-generate-btn" id="screenshot-ai-generate-btn-device"
                             title="Generate a device screen image with AI">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -716,6 +780,14 @@
                         <div class="btn-group" id="device-type-selector">
                             <button class="active" data-type="2d">2D</button>
                             <button data-type="3d">3D</button>
+                        </div>
+                    </div>
+
+                    <div id="linked-3d-tip" class="tip-box device-linked-tip" style="display: none;">
+                        <img src="img/info.svg" width="16" height="16" alt="Info">
+                        <div class="tip-content">
+                            <strong>3D needs one visible device</strong>
+                            <span>Show the device and remove extra or linked devices before switching to 3D.</span>
                         </div>
                     </div>
 
@@ -748,6 +820,11 @@
                                 <span class="range-value" id="rotation-3d-z-value">0°</span>
                             </div>
                         </div>
+                    </div>
+
+                    <div class="device-control-section-title">
+                        <span>Layout</span>
+                        <em id="device-layout-scope">Selected device</em>
                     </div>
 
                     <div id="position-presets-section">
@@ -821,9 +898,9 @@
                     <div class="divider"></div>
 
                     <div class="control-group">
-                        <label class="control-label">Screenshot Scale</label>
+                        <label class="control-label">Device Size</label>
                         <div class="control-row">
-                            <input type="range" id="screenshot-scale" min="30" max="100" value="70">
+                            <input type="range" id="screenshot-scale" min="20" max="160" value="70">
                             <span class="range-value" id="screenshot-scale-value">70%</span>
                         </div>
                     </div>
@@ -831,7 +908,7 @@
                     <div class="control-group">
                         <label class="control-label">Vertical Position</label>
                         <div class="control-row">
-                            <input type="range" id="screenshot-y" min="-80" max="180" value="55">
+                            <input type="range" id="screenshot-y" min="-80" max="180" step="0.1" value="55">
                             <span class="range-value" id="screenshot-y-value">55%</span>
                         </div>
                     </div>
@@ -839,7 +916,7 @@
                     <div class="control-group">
                         <label class="control-label">Horizontal Position</label>
                         <div class="control-row">
-                            <input type="range" id="screenshot-x" min="-360" max="360" value="50">
+                            <input type="range" id="screenshot-x" min="-360" max="360" step="0.1" value="50">
                             <span class="range-value" id="screenshot-x-value">50%</span>
                         </div>
                     </div>
@@ -850,16 +927,6 @@
                     </div>
 
                     <div id="2d-only-settings">
-                        <div class="divider"></div>
-
-                        <div class="control-group">
-                            <label class="control-label">Corner Radius</label>
-                            <div class="control-row">
-                                <input type="range" id="corner-radius" min="0" max="100" value="24">
-                                <span class="range-value" id="corner-radius-value">24px</span>
-                            </div>
-                        </div>
-
                         <div class="control-group">
                             <label class="control-label">Tilt / Rotation</label>
                             <div class="control-row">
@@ -868,7 +935,36 @@
                             </div>
                         </div>
 
+                        <div class="control-group">
+                            <label class="control-label">Perspective</label>
+                            <div class="control-row">
+                                <input type="range" id="screenshot-perspective" min="-30" max="30" value="0">
+                                <span class="range-value" id="screenshot-perspective-value">0°</span>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label class="control-label">Opacity</label>
+                            <div class="control-row">
+                                <input type="range" id="screenshot-opacity" min="0" max="100" value="100">
+                                <span class="range-value" id="screenshot-opacity-value">100%</span>
+                            </div>
+                        </div>
+
                         <div class="divider"></div>
+
+                        <div class="device-control-section-title device-appearance-heading">
+                            <span>Appearance</span>
+                            <em id="device-appearance-scope">This screen</em>
+                        </div>
+
+                        <div class="control-group">
+                            <label class="control-label">Corner Radius</label>
+                            <div class="control-row">
+                                <input type="range" id="corner-radius" min="0" max="100" value="24">
+                                <span class="range-value" id="corner-radius-value">24px</span>
+                            </div>
+                        </div>
 
                         <div class="control-group">
                             <div class="toggle-row collapsible" data-target="shadow-options">
@@ -2422,11 +2518,11 @@
     <script src="llm.js"></script>
     <script src="language-utils.js"></script>
     <script src="magical-titles.js"></script>
-    <script src="ai-image-gen.js"></script>
+    <script src="ai-image-gen.js?v=20260904-device-editor-1"></script>
     <script src="lucide-icons.js"></script>
     <script src="three-renderer.js"></script>
-    <script src="templates.js"></script>
-    <script src="app.js?v=20260903-precision-studio-3"></script>
+    <script src="templates.js?v=20260904-device-editor-1"></script>
+    <script src="app.js?v=20260904-device-editor-1"></script>
 </body>
 
 </html>

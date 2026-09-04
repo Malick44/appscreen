@@ -210,7 +210,7 @@ function applyGeneratedImage(dataUrl, mode) {
             });
             updateCanvas();
             syncUIWithState();
-        } else if (mode === 'screenshot') {
+        } else if (mode === 'screenshot' || mode === 'selected-device') {
             const lang = state.currentLanguage;
             const name = `ai-generated-${lang}.png`;
 
@@ -221,7 +221,14 @@ function applyGeneratedImage(dataUrl, mode) {
                 updateCanvas();
             }
 
-            const idx = state.selectedIndex;
+            let idx = state.selectedIndex;
+            if (mode === 'selected-device' && typeof getSelectedDeviceContext === 'function') {
+                const deviceContext = getSelectedDeviceContext();
+                if (deviceContext && !deviceContext.isBase && typeof getDeviceSourceIndex === 'function') {
+                    const sourceIndex = getDeviceSourceIndex(deviceContext.screenIndex, deviceContext.device);
+                    if (sourceIndex >= 0) idx = sourceIndex;
+                }
+            }
             addLocalizedImage(idx, lang, img, dataUrl, name);
         }
     };
@@ -252,7 +259,11 @@ function showAIImageGenDialog(mode) {
     aiImageGenMode = mode;
 
     const modeEl = document.getElementById('ai-image-gen-mode-label');
-    if (modeEl) modeEl.textContent = mode === 'background' ? 'Background Image' : 'Device Screen';
+    if (modeEl) modeEl.textContent = mode === 'background'
+        ? 'Background Image'
+        : mode === 'selected-device'
+            ? 'Selected Device Screen'
+            : 'Device Screen';
 
     // Populate model selector
     const select = document.getElementById('ai-image-gen-model');
@@ -284,6 +295,14 @@ function showAIImageGenDialog(mode) {
             infoEl.style.display = '';
         } else if (mode === 'screenshot') {
             infoEl.textContent = `Generated image will replace the device screen on screenshot \u201c${state.screenshots[state.selectedIndex]?.name || '#' + (state.selectedIndex + 1)}\u201d.`;
+            infoEl.style.display = '';
+        } else if (mode === 'selected-device') {
+            const deviceContext = typeof getSelectedDeviceContext === 'function' ? getSelectedDeviceContext() : null;
+            const sourceIndex = deviceContext && !deviceContext.isBase && typeof getDeviceSourceIndex === 'function'
+                ? getDeviceSourceIndex(deviceContext.screenIndex, deviceContext.device)
+                : state.selectedIndex;
+            const sourceScreen = state.screenshots[sourceIndex] || state.screenshots[state.selectedIndex];
+            infoEl.textContent = `Generated image will replace the screen content used by this device: \u201c${sourceScreen?.name || '#' + (sourceIndex + 1)}\u201d.`;
             infoEl.style.display = '';
         } else {
             infoEl.style.display = 'none';
@@ -413,7 +432,7 @@ function initAIImageGen() {
 
     // Screenshot AI generate button (Device tab)
     const screenshotAiBtnDevice = document.getElementById('screenshot-ai-generate-btn-device');
-    if (screenshotAiBtnDevice) screenshotAiBtnDevice.addEventListener('click', () => showAIImageGenDialog('screenshot'));
+    if (screenshotAiBtnDevice) screenshotAiBtnDevice.addEventListener('click', () => showAIImageGenDialog('selected-device'));
 }
 
 // Auto-init when DOM is ready

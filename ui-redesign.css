@@ -1030,6 +1030,37 @@ html.tauri-app .app-container {
     }
 }
 
+@media (max-width: 359px) {
+    .workspace-navigator,
+    .workspace-inspector {
+        width: 100vw;
+    }
+
+    .device-layer-actions {
+        grid-template-columns: minmax(0, 1fr) repeat(4, 40px);
+    }
+
+    .device-action {
+        min-width: 40px;
+        height: 40px;
+    }
+
+    .device-action-primary {
+        padding-inline: 6px;
+        white-space: nowrap;
+    }
+
+    .device-source-field {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 5px;
+    }
+
+    .device-source-field select {
+        width: 100%;
+        height: 40px;
+    }
+}
+
 @media (pointer: coarse) {
     .settings-btn,
     .language-btn,
@@ -1048,6 +1079,12 @@ html.tauri-app .app-container {
     .output-size-trigger,
     .preset-dropdown-trigger {
         min-height: 44px;
+    }
+
+    .device-action,
+    .device-visibility-btn {
+        min-width: 40px;
+        min-height: 40px;
     }
 }
 
