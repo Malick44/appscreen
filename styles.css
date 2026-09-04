@@ -190,7 +190,7 @@ html.tauri-app .right-sidebar {
     color: var(--text-secondary);
     font-size: 12px;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease, left 0.15s ease;
 }
 
 .add-btn:hover {
@@ -340,7 +340,7 @@ html.tauri-app .right-sidebar {
     background: var(--bg-tertiary);
     border-radius: 6px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
     border: 2px solid transparent;
 }
 
@@ -404,7 +404,7 @@ html.tauri-app .right-sidebar {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .screenshot-menu-btn:hover {
@@ -564,7 +564,7 @@ html.tauri-app .right-sidebar {
     color: var(--text-secondary);
     font-size: 12px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .set-default-btn:hover {
@@ -642,7 +642,7 @@ textarea {
     border-radius: 8px;
     color: var(--text-primary);
     font-size: 14px;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 input[type="text"]:focus,
@@ -708,7 +708,7 @@ input[type="range"]::-webkit-slider-thumb {
     font-weight: 500;
     cursor: pointer;
     border-radius: 6px;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .btn-group button.active {
@@ -805,7 +805,7 @@ input[type="range"]::-webkit-slider-thumb {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .text-style-bar button:hover {
@@ -927,7 +927,7 @@ input[type="range"]::-webkit-slider-thumb {
     color: var(--text-secondary);
     font-size: 13px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
     margin-top: 4px;
 }
 
@@ -1108,7 +1108,7 @@ input[type="range"]::-webkit-slider-thumb {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .output-size-trigger:hover {
@@ -1160,7 +1160,7 @@ input[type="range"]::-webkit-slider-thumb {
     opacity: 0;
     visibility: hidden;
     transform: translateY(10px);
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
     z-index: 100;
 }
 
@@ -1177,7 +1177,7 @@ input[type="range"]::-webkit-slider-thumb {
     padding: 8px 10px;
     border-radius: 6px;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease, left 0.15s ease;
     border: none;
     background: transparent;
 }
@@ -1252,7 +1252,7 @@ input[type="range"]::-webkit-slider-thumb {
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
     white-space: nowrap;
 }
 
@@ -1294,7 +1294,7 @@ input[type="range"]::-webkit-slider-thumb {
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .modal-overlay.visible {
@@ -1363,7 +1363,7 @@ input[type="range"]::-webkit-slider-thumb {
     font-size: 15px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .modal-btn-cancel {
@@ -1486,7 +1486,7 @@ input[type="range"]::-webkit-slider-thumb {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .ai-translate-btn:hover:not(:disabled) {
@@ -1569,7 +1569,7 @@ input[type="range"]::-webkit-slider-thumb {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .modal-close:hover {
@@ -1616,7 +1616,7 @@ input[type="range"]::-webkit-slider-thumb {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
     flex: 1;
     min-width: 140px;
 }
@@ -1674,7 +1674,7 @@ input[type="range"]::-webkit-slider-thumb {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .settings-show-key:hover {
@@ -1759,7 +1759,7 @@ input[type="range"]::-webkit-slider-thumb {
     border-radius: 8px;
     cursor: pointer;
     text-align: center;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .device-option:hover {
@@ -1799,7 +1799,7 @@ input[type="range"]::-webkit-slider-thumb {
     color: var(--text-primary);
     font-size: 12px;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease, left 0.15s ease;
 }
 
 .preset-dropdown-trigger:hover {
@@ -1834,7 +1834,7 @@ input[type="range"]::-webkit-slider-thumb {
     border-radius: 3px;
     cursor: pointer;
     border: 1px solid rgba(255, 255, 255, 0.08);
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
     position: relative;
 }
 
@@ -1859,7 +1859,7 @@ input[type="range"]::-webkit-slider-thumb {
     border-radius: 50%;
     cursor: pointer;
     border: 2px solid transparent;
-    transition: all 0.15s;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease, left 0.15s ease;
 }
 
 .frame-color-swatch:hover {
@@ -1894,7 +1894,7 @@ input[type="range"]::-webkit-slider-thumb {
     font-weight: 500;
     cursor: pointer;
     border-radius: 6px;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .tab svg {
@@ -1968,7 +1968,7 @@ input[type="range"]::-webkit-slider-thumb {
     border-radius: 12px;
     position: relative;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .toggle.active {
@@ -1984,7 +1984,7 @@ input[type="range"]::-webkit-slider-thumb {
     border-radius: 50%;
     top: 2px;
     left: 2px;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .toggle.active::after {
@@ -2015,7 +2015,7 @@ input[type="range"]::-webkit-slider-thumb {
     color: var(--text-primary);
     font-size: 14px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .font-picker-trigger:hover {
@@ -2096,7 +2096,7 @@ input[type="range"]::-webkit-slider-thumb {
     color: var(--text-secondary);
     font-size: 12px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .font-category:hover {
@@ -2209,7 +2209,7 @@ input[type="range"]::-webkit-slider-thumb {
     border: 2px solid transparent;
     border-radius: 8px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
     color: var(--text-secondary);
 }
 
@@ -2284,7 +2284,7 @@ input[type="range"]::-webkit-slider-thumb {
     padding: 16px;
     text-align: center;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .bg-image-upload:hover {
@@ -2314,7 +2314,7 @@ input[type="range"]::-webkit-slider-thumb {
     border-radius: 8px;
     text-align: center;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .format-option.selected {
@@ -2411,7 +2411,7 @@ input[type="range"]::-webkit-slider-thumb {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .project-trigger:hover {
@@ -2470,7 +2470,7 @@ input[type="range"]::-webkit-slider-thumb {
     opacity: 0;
     visibility: hidden;
     transform: translateY(-10px);
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
     z-index: 100;
     max-height: 300px;
     overflow-y: auto;
@@ -2489,7 +2489,7 @@ input[type="range"]::-webkit-slider-thumb {
     padding: 8px 10px;
     border-radius: 6px;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease, left 0.15s ease;
 }
 
 .project-option:hover {
@@ -2529,7 +2529,7 @@ input[type="range"]::-webkit-slider-thumb {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .project-btn:hover {
@@ -2566,7 +2566,7 @@ input[type="range"]::-webkit-slider-thumb {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .settings-btn:hover {
@@ -2634,7 +2634,7 @@ input[type="range"]::-webkit-slider-thumb {
     justify-content: center;
     font-size: 12px;
     pointer-events: auto;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .feature-tooltip-close:hover {
@@ -2681,7 +2681,7 @@ input[type="range"]::-webkit-slider-thumb {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .language-btn:hover {
@@ -2729,7 +2729,7 @@ input[type="range"]::-webkit-slider-thumb {
     border-radius: 6px;
     font-size: 14px;
     text-align: left;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
     width: 100%;
 }
 
@@ -2764,7 +2764,7 @@ input[type="range"]::-webkit-slider-thumb {
     border-radius: 6px;
     font-size: 13px;
     text-align: left;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
     width: 100%;
 }
 
@@ -2806,7 +2806,7 @@ input[type="range"]::-webkit-slider-thumb {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
     opacity: 0.8;
 }
 
@@ -2973,7 +2973,7 @@ input[type="range"]::-webkit-slider-thumb {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .language-item .remove-btn:hover {
@@ -3088,7 +3088,7 @@ input[type="range"]::-webkit-slider-thumb {
     border-radius: 6px;
     cursor: pointer;
     font-size: 13px;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .translation-upload:hover {
@@ -3106,7 +3106,7 @@ input[type="range"]::-webkit-slider-thumb {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
 }
 
 .translation-remove:hover {
@@ -3132,7 +3132,7 @@ input[type="range"]::-webkit-slider-thumb {
     background: var(--bg-tertiary);
     border-radius: 10px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
     text-align: left;
     width: 100%;
 }
@@ -3270,7 +3270,7 @@ input[type="range"]::-webkit-slider-thumb {
     background: var(--bg-tertiary);
     border-radius: 10px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, left 0.2s ease;
     text-align: left;
 }
 
@@ -3326,7 +3326,7 @@ input[type="range"]::-webkit-slider-thumb {
     color: var(--text-primary);
     font-size: 12px;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease, left 0.15s ease;
 }
 
 .add-element-btn:hover {
@@ -3365,7 +3365,7 @@ input[type="range"]::-webkit-slider-thumb {
     border: 1px solid transparent;
     border-radius: 6px;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease, left 0.15s ease;
 }
 
 .element-item:hover {
@@ -3484,7 +3484,7 @@ input[type="range"]::-webkit-slider-thumb {
     color: var(--text-primary);
     font-size: 12px;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease, left 0.15s ease;
     margin-bottom: 12px;
 }
 
@@ -3522,7 +3522,7 @@ input[type="range"]::-webkit-slider-thumb {
     border: 1px solid transparent;
     border-radius: 6px;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease, left 0.15s ease;
 }
 
 .popout-item:hover {
@@ -3656,7 +3656,7 @@ input[type="range"]::-webkit-slider-thumb {
     font-size: 10px;
     cursor: pointer;
     white-space: nowrap;
-    transition: all 0.15s;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease, left 0.15s ease;
 }
 
 .picker-cat:hover {
@@ -3696,7 +3696,7 @@ input[type="range"]::-webkit-slider-thumb {
     border-radius: 6px;
     cursor: pointer;
     border: 1px solid transparent;
-    transition: all 0.12s;
+    transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease, transform 0.12s ease, visibility 0.12s ease, left 0.12s ease;
 }
 
 .picker-grid-item:hover {

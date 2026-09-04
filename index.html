@@ -19,7 +19,11 @@
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23667eea'/><rect x='20' y='30' width='60' height='45' rx='5' fill='white'/><circle cx='50' cy='20' r='5' fill='white'/></svg>">
 
-    <link rel="stylesheet" href="styles.css?v=20260724-device-copy">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Geist+Mono:wght@400;500&family=Geist:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=20260903-precision-studio-base">
+    <link rel="stylesheet" href="ui-redesign.css?v=20260903-precision-studio">
 
     <!-- Detect Tauri and add class for native styling -->
     <script>
@@ -77,8 +81,36 @@
 
 <body>
     <div class="app-container">
+        <header class="app-topbar" aria-label="App workspace">
+            <div class="brand-lockup" aria-label="AppScreen home">
+                <span class="brand-mark" aria-hidden="true">
+                    <span></span>
+                </span>
+                <span class="brand-name">AppScreen</span>
+                <span class="brand-edition">Studio</span>
+            </div>
+            <div class="workspace-status" id="save-status" role="status" aria-live="polite">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span class="status-copy">Saved locally</span>
+            </div>
+            <div class="topbar-actions">
+                <button class="button button-secondary" id="top-export-current" type="button">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                    </svg>
+                    <span class="button-label">Export current</span>
+                </button>
+                <button class="button button-primary" id="top-export-all" type="button">
+                    <span class="button-label">Export set</span>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="M5 12h14M13 6l6 6-6 6" />
+                    </svg>
+                </button>
+            </div>
+        </header>
+
         <!-- Left Sidebar - Screenshots -->
-        <div class="sidebar">
+        <div class="sidebar workspace-navigator" id="workspace-navigator">
             <div class="sidebar-content">
                 <div class="sidebar-header">
                     <h2>Project</h2>
@@ -326,7 +358,14 @@
         </div>
 
         <!-- Main Canvas Area -->
-        <div class="canvas-area">
+        <main class="canvas-area" id="workspace-canvas">
+            <div class="proofing-meta" aria-label="Output preview details">
+                <span class="proofing-kicker">Proof</span>
+                <span id="proofing-device">iPhone 6.9&quot;</span>
+                <span class="proofing-divider" aria-hidden="true"></span>
+                <span class="proofing-mono" id="proofing-dimensions">1320 × 2868</span>
+                <span class="proofing-language" id="proofing-language">EN</span>
+            </div>
             <div class="preview-strip">
                 <div class="side-preview side-preview-far-left" id="side-preview-far-left">
                     <canvas id="preview-canvas-far-left"></canvas>
@@ -343,7 +382,11 @@
                             <circle cx="8.5" cy="8.5" r="1.5" />
                             <path d="M21 15l-5-5L5 21" />
                         </svg>
-                        <p>Upload screenshots to get started</p>
+                        <p>Build your first store-ready screen</p>
+                        <span>Import an app screenshot or start with a blank canvas.</span>
+                        <button class="button button-primary empty-add-btn" id="empty-add-btn" type="button">
+                            Add screenshot
+                        </button>
                     </div>
                 </div>
                 <div class="side-preview side-preview-right" id="side-preview-right">
@@ -353,10 +396,10 @@
                     <canvas id="preview-canvas-far-right"></canvas>
                 </div>
             </div>
-        </div>
+        </main>
 
         <!-- Right Sidebar - Settings -->
-        <div class="sidebar sidebar-right">
+        <div class="sidebar sidebar-right workspace-inspector" id="workspace-inspector">
             <div class="sidebar-header">
                 <div class="tabs">
                     <button class="tab active" data-tab="background">
@@ -1747,6 +1790,36 @@
 
             </div><!-- end sidebar-content -->
         </div>
+
+        <button class="mobile-drawer-backdrop" id="mobile-drawer-backdrop" type="button" aria-label="Close panel"></button>
+        <nav class="mobile-workspace-nav" aria-label="Workspace sections">
+            <button type="button" data-mobile-panel="screens" aria-controls="workspace-navigator">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <rect x="4" y="4" width="16" height="16" rx="2" />
+                    <path d="M8 9h8M8 13h8M8 17h5" />
+                </svg>
+                <span>Screens</span>
+            </button>
+            <button class="active" type="button" data-mobile-panel="canvas" aria-controls="workspace-canvas" aria-current="page">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path d="M4 5h16v14H4z" />
+                    <path d="M9 9h6v6H9z" />
+                </svg>
+                <span>Canvas</span>
+            </button>
+            <button type="button" data-mobile-panel="inspector" aria-controls="workspace-inspector">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path d="M4 6h16M7 12h10M10 18h4" />
+                </svg>
+                <span>Design</span>
+            </button>
+            <button class="mobile-export-action" type="button" id="mobile-export-all">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+                </svg>
+                <span>Export</span>
+            </button>
+        </nav>
     </div>
 
     <!-- Project Name Modal -->
@@ -2353,7 +2426,7 @@
     <script src="lucide-icons.js"></script>
     <script src="three-renderer.js"></script>
     <script src="templates.js"></script>
-    <script src="app.js?v=20260724-ai-proxy-device-copy"></script>
+    <script src="app.js?v=20260903-precision-studio-3"></script>
 </body>
 
 </html>

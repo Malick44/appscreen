@@ -1640,9 +1640,126 @@ async function init() {
     }
 }
 
+function setupStudioUI() {
+    const navigator = document.getElementById('workspace-navigator');
+    const inspector = document.getElementById('workspace-inspector');
+    const backdrop = document.getElementById('mobile-drawer-backdrop');
+    const panelButtons = Array.from(document.querySelectorAll('[data-mobile-panel]'));
+
+    document.querySelector('.sidebar-right .tabs')?.setAttribute('role', 'tablist');
+    document.querySelectorAll('button[title]:not([aria-label])').forEach(button => {
+        button.setAttribute('aria-label', button.title);
+    });
+    document.querySelectorAll('button.modal-close:not([aria-label])').forEach(button => {
+        button.setAttribute('aria-label', 'Close dialog');
+    });
+
+    const syncButtonState = (button) => {
+        if (button.classList.contains('toggle')) {
+            button.setAttribute('role', 'switch');
+            button.setAttribute('aria-checked', String(button.classList.contains('active')));
+        } else if (button.closest('.btn-group')) {
+            button.setAttribute('aria-pressed', String(button.classList.contains('active')));
+        }
+    };
+    const statefulButtons = document.querySelectorAll('button.toggle, .btn-group button');
+    statefulButtons.forEach(syncButtonState);
+    const buttonStateObserver = new MutationObserver(records => {
+        records.forEach(record => syncButtonState(record.target));
+    });
+    statefulButtons.forEach(button => {
+        buttonStateObserver.observe(button, { attributes: true, attributeFilter: ['class'] });
+    });
+
+    document.getElementById('top-export-current')?.addEventListener('click', exportCurrent);
+    document.getElementById('top-export-all')?.addEventListener('click', exportAll);
+    document.getElementById('mobile-export-all')?.addEventListener('click', exportAll);
+    document.getElementById('empty-add-btn')?.addEventListener('click', () => {
+        document.getElementById('add-screenshots-btn')?.click();
+    });
+
+    const setActiveMobileSection = (section) => {
+        panelButtons.forEach(button => {
+            const buttonSection = button.dataset.mobilePanel;
+            const isActive = buttonSection === section;
+            button.classList.toggle('active', isActive);
+            if (isActive) button.setAttribute('aria-current', 'page');
+            else button.removeAttribute('aria-current');
+            button.setAttribute('aria-expanded', String(
+                (buttonSection === 'screens' && navigator?.classList.contains('is-mobile-open')) ||
+                (buttonSection === 'inspector' && inspector?.classList.contains('is-mobile-open'))
+            ));
+        });
+    };
+
+    const closeMobilePanels = () => {
+        navigator?.classList.remove('is-mobile-open');
+        inspector?.classList.remove('is-mobile-open');
+        backdrop?.classList.remove('visible');
+        document.body.classList.remove('mobile-panel-open');
+        setActiveMobileSection('canvas');
+    };
+
+    panelButtons.forEach(button => {
+        button.setAttribute('aria-expanded', 'false');
+        button.addEventListener('click', () => {
+            const section = button.dataset.mobilePanel;
+            if (section === 'canvas') {
+                closeMobilePanels();
+                return;
+            }
+
+            navigator?.classList.toggle('is-mobile-open', section === 'screens');
+            inspector?.classList.toggle('is-mobile-open', section === 'inspector');
+            backdrop?.classList.add('visible');
+            document.body.classList.add('mobile-panel-open');
+            setActiveMobileSection(section);
+        });
+    });
+
+    backdrop?.addEventListener('click', closeMobilePanels);
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && document.body.classList.contains('mobile-panel-open')) {
+            closeMobilePanels();
+        }
+    });
+    let resizeFrame = null;
+    window.addEventListener('resize', () => {
+        if (window.innerWidth >= 900) closeMobilePanels();
+        if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+        resizeFrame = window.requestAnimationFrame(() => {
+            resizeFrame = null;
+            updateCanvas();
+        });
+    });
+
+    const isEmpty = state.screenshots.length === 0;
+    ['top-export-current', 'top-export-all', 'mobile-export-all'].forEach(id => {
+        const button = document.getElementById(id);
+        if (button) button.disabled = isEmpty;
+    });
+}
+
+function setBulkExportBusy(isBusy) {
+    ['export-all', 'top-export-all', 'mobile-export-all'].forEach(id => {
+        const button = document.getElementById(id);
+        if (!button) return;
+
+        button.classList.toggle('is-loading', isBusy);
+        button.setAttribute('aria-busy', String(isBusy));
+        button.disabled = isBusy || state.screenshots.length === 0;
+
+        const label = button.querySelector('.button-label') || button.querySelector(':scope > span');
+        if (!label) return;
+        if (!label.dataset.idleLabel) label.dataset.idleLabel = label.textContent;
+        label.textContent = isBusy ? 'Exporting…' : label.dataset.idleLabel;
+    });
+}
+
 // Set up event listeners immediately (don't wait for async init)
 function initSync() {
     setupEventListeners();
+    setupStudioUI();
     setupElementEventListeners();
     setupPopoutEventListeners();
     setupSliderResetButtons();
@@ -1653,9 +1770,32 @@ function initSync() {
     init();
 }
 
+let saveStatusVersion = 0;
+let workspaceStatusTimer = null;
+
+function setWorkspaceStatus(kind, message, restoreDelay = 0) {
+    const status = document.getElementById('save-status');
+    if (!status) return;
+
+    clearTimeout(workspaceStatusTimer);
+    status.classList.toggle('is-saving', kind === 'saving');
+    status.classList.toggle('is-error', kind === 'error');
+    const copy = status.querySelector('.status-copy');
+    if (copy) copy.textContent = message;
+
+    if (restoreDelay > 0) {
+        workspaceStatusTimer = setTimeout(() => {
+            setWorkspaceStatus('saved', 'Saved locally');
+        }, restoreDelay);
+    }
+}
+
 // Save state to IndexedDB for current project
 function saveState() {
     if (!db) return;
+
+    const currentSaveVersion = ++saveStatusVersion;
+    setWorkspaceStatus('saving', 'Saving…');
 
     // Convert screenshots to base64 for storage, including per-screenshot settings and localized images
     const screenshotsToSave = state.screenshots.map(s => {
@@ -1718,8 +1858,22 @@ function saveState() {
         const transaction = db.transaction([PROJECTS_STORE], 'readwrite');
         const store = transaction.objectStore(PROJECTS_STORE);
         store.put(stateToSave);
+        transaction.oncomplete = () => {
+            if (currentSaveVersion === saveStatusVersion) {
+                setWorkspaceStatus('saved', 'Saved locally');
+            }
+        };
+        transaction.onerror = () => {
+            if (currentSaveVersion === saveStatusVersion) {
+                setWorkspaceStatus('error', 'Save failed');
+            }
+        };
+        transaction.onabort = transaction.onerror;
     } catch (e) {
         console.error('Error saving state:', e);
+        if (currentSaveVersion === saveStatusVersion) {
+            setWorkspaceStatus('error', 'Save failed');
+        }
     }
 }
 
@@ -2332,6 +2486,7 @@ function syncUIWithState() {
             document.getElementById('output-size-dims').textContent = selectedOption.querySelector('.device-option-size').textContent;
         }
     }
+    updateProofingMeta();
 
     // Show/hide custom inputs
     const customInputs = document.getElementById('custom-size-inputs');
@@ -4025,7 +4180,7 @@ function setupEventListeners() {
             URL.revokeObjectURL(a.href);
         } catch (e) {
             console.error('Export failed:', e);
-            alert('Export failed: ' + e.message);
+            await showAppAlert('Project backup failed: ' + e.message, 'error');
         }
     });
 
@@ -4052,11 +4207,11 @@ function setupEventListeners() {
                     tx.onerror = () => reject(tx.error);
                 });
             }
-            alert('Import complete! Reloading...');
+            await showAppAlert('Import complete. AppScreen will now reload.', 'success');
             location.reload();
         } catch (e) {
             console.error('Import failed:', e);
-            alert('Import failed: ' + e.message);
+            await showAppAlert('Project import failed: ' + e.message, 'error');
         }
         importInput.value = '';
     });
@@ -4349,15 +4504,50 @@ function setupEventListeners() {
     });
 
     // Tabs
-    document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            tab.classList.add('active');
-            document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
-            // Save active tab to localStorage
-            localStorage.setItem('activeTab', tab.dataset.tab);
+    const inspectorTabs = Array.from(document.querySelectorAll('.tab'));
+    const activateInspectorTab = (tab, moveFocus = false) => {
+        inspectorTabs.forEach(t => {
+            const isActive = t === tab;
+            t.classList.toggle('active', isActive);
+            t.setAttribute('aria-selected', String(isActive));
+            t.tabIndex = isActive ? 0 : -1;
         });
+        document.querySelectorAll('.tab-content').forEach(content => {
+            const isActive = content.id === 'tab-' + tab.dataset.tab;
+            content.classList.toggle('active', isActive);
+            content.hidden = !isActive;
+        });
+        localStorage.setItem('activeTab', tab.dataset.tab);
+        if (moveFocus) tab.focus();
+    };
+
+    inspectorTabs.forEach((tab, index) => {
+        const panel = document.getElementById('tab-' + tab.dataset.tab);
+        tab.id = tab.id || `inspector-tab-${tab.dataset.tab}`;
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('aria-controls', panel?.id || '');
+        tab.setAttribute('aria-selected', String(tab.classList.contains('active')));
+        tab.tabIndex = tab.classList.contains('active') ? 0 : -1;
+        if (panel) {
+            panel.setAttribute('role', 'tabpanel');
+            panel.setAttribute('aria-labelledby', tab.id);
+            panel.hidden = !panel.classList.contains('active');
+        }
+        if (tab.dataset.studioTabReady !== 'true') {
+            tab.dataset.studioTabReady = 'true';
+            tab.addEventListener('click', () => activateInspectorTab(tab));
+            tab.addEventListener('keydown', (event) => {
+                let nextIndex = null;
+                if (event.key === 'ArrowRight') nextIndex = (index + 1) % inspectorTabs.length;
+                if (event.key === 'ArrowLeft') nextIndex = (index - 1 + inspectorTabs.length) % inspectorTabs.length;
+                if (event.key === 'Home') nextIndex = 0;
+                if (event.key === 'End') nextIndex = inspectorTabs.length - 1;
+                if (nextIndex !== null) {
+                    event.preventDefault();
+                    activateInspectorTab(inspectorTabs[nextIndex], true);
+                }
+            });
+        }
     });
 
     // Restore active tab from localStorage
@@ -4365,10 +4555,7 @@ function setupEventListeners() {
     if (savedTab) {
         const tabBtn = document.querySelector(`.tab[data-tab="${savedTab}"]`);
         if (tabBtn) {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            tabBtn.classList.add('active');
-            document.getElementById('tab-' + savedTab).classList.add('active');
+            activateInspectorTab(tabBtn);
         }
     }
 
@@ -5030,6 +5217,19 @@ function updateLanguageMenu() {
 function updateLanguageButton() {
     const flag = languageFlags[state.currentLanguage] || '🏳️';
     document.getElementById('language-btn-flag').textContent = flag;
+    updateProofingMeta();
+}
+
+function updateProofingMeta() {
+    const device = document.getElementById('proofing-device');
+    const dimensions = document.getElementById('proofing-dimensions');
+    const language = document.getElementById('proofing-language');
+    const outputName = document.getElementById('output-size-name');
+    const outputDimensions = document.getElementById('output-size-dims');
+
+    if (device && outputName) device.textContent = outputName.textContent;
+    if (dimensions && outputDimensions) dimensions.textContent = outputDimensions.textContent;
+    if (language) language.textContent = (state.currentLanguage || 'en').toUpperCase();
 }
 
 function switchGlobalLanguage(lang) {
@@ -6307,6 +6507,13 @@ function updateProviderSection(provider) {
 }
 
 function saveSettings() {
+    const saveButton = document.getElementById('settings-modal-save');
+    if (saveButton) {
+        saveButton.disabled = true;
+        saveButton.classList.add('is-loading');
+        saveButton.textContent = 'Saving…';
+    }
+
     // Save theme preference
     const activeThemeBtn = document.querySelector('#theme-selector button.active');
     const themePreference = activeThemeBtn ? activeThemeBtn.dataset.theme : 'auto';
@@ -6351,9 +6558,22 @@ function saveSettings() {
     });
 
     if (allValid) {
+        if (saveButton) {
+            saveButton.classList.remove('is-loading');
+            saveButton.textContent = 'Saved';
+        }
+        setWorkspaceStatus('saved', 'Settings saved', 1800);
         setTimeout(() => {
             document.getElementById('settings-modal').classList.remove('visible');
+            if (saveButton) {
+                saveButton.disabled = false;
+                saveButton.textContent = 'Save Settings';
+            }
         }, 500);
+    } else if (saveButton) {
+        saveButton.disabled = false;
+        saveButton.classList.remove('is-loading');
+        saveButton.textContent = 'Save Settings';
     }
 }
 
@@ -6715,10 +6935,13 @@ function updateScreenshotList() {
     // Disable right sidebar and export buttons when no screenshots
     const rightSidebar = document.querySelector('.sidebar-right');
     if (rightSidebar) rightSidebar.classList.toggle('disabled', isEmpty);
-    const exportCurrent = document.getElementById('export-current');
-    const exportAll = document.getElementById('export-all');
-    if (exportCurrent) { exportCurrent.disabled = isEmpty; exportCurrent.style.opacity = isEmpty ? '0.4' : ''; exportCurrent.style.pointerEvents = isEmpty ? 'none' : ''; }
-    if (exportAll) { exportAll.disabled = isEmpty; exportAll.style.opacity = isEmpty ? '0.4' : ''; exportAll.style.pointerEvents = isEmpty ? 'none' : ''; }
+    ['export-current', 'export-all', 'top-export-current', 'top-export-all', 'mobile-export-all'].forEach(id => {
+        const button = document.getElementById(id);
+        if (!button) return;
+        button.disabled = isEmpty;
+        button.style.opacity = isEmpty ? '0.45' : '';
+        button.style.pointerEvents = isEmpty ? 'none' : '';
+    });
 
     // Show transfer mode hint if active
     if (state.transferTarget !== null && state.screenshots.length > 1) {
@@ -7384,14 +7607,19 @@ function getCanvasDimensions() {
 }
 
 function updateCanvas() {
+    updateProofingMeta();
     saveState(); // Persist state on every update
     const dims = getCanvasDimensions();
     canvas.width = dims.width;
     canvas.height = dims.height;
 
     // Scale for preview
-    const maxPreviewWidth = 400;
-    const maxPreviewHeight = 700;
+    const stage = document.getElementById('workspace-canvas');
+    const stageWidth = stage?.clientWidth || 520;
+    const stageHeight = stage?.clientHeight || 820;
+    const isCompactWorkspace = window.innerWidth < 900;
+    const maxPreviewWidth = Math.min(400, Math.max(220, stageWidth - (isCompactWorkspace ? 32 : 136)));
+    const maxPreviewHeight = Math.min(700, Math.max(220, stageHeight - (isCompactWorkspace ? 100 : 116)));
     const scale = Math.min(maxPreviewWidth / dims.width, maxPreviewHeight / dims.height);
     canvas.style.width = (dims.width * scale) + 'px';
     canvas.style.height = (dims.height * scale) + 'px';
@@ -8771,6 +8999,7 @@ async function exportCurrent() {
     link.download = `screenshot-${state.selectedIndex + 1}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
+    setWorkspaceStatus('saved', 'Current screen exported', 1800);
 }
 
 async function exportAll() {
@@ -8786,14 +9015,25 @@ async function exportAll() {
         // Show language choice dialog
         showExportLanguageDialog(async (choice) => {
             if (choice === 'current') {
-                await exportAllForLanguage(state.currentLanguage);
+                await runBulkExport(() => exportAllForLanguage(state.currentLanguage));
             } else if (choice === 'all') {
-                await exportAllLanguages();
+                await runBulkExport(exportAllLanguages);
             }
         });
     } else {
         // Only one language, export directly
-        await exportAllForLanguage(state.currentLanguage);
+        await runBulkExport(() => exportAllForLanguage(state.currentLanguage));
+    }
+}
+
+async function runBulkExport(exportTask) {
+    try {
+        await exportTask();
+    } catch (error) {
+        console.error('Export failed:', error);
+        hideExportProgress(false);
+        setWorkspaceStatus('error', 'Export failed');
+        await showAppAlert('The export could not be completed. Please try again.', 'error');
     }
 }
 
@@ -8808,12 +9048,15 @@ function showExportProgress(status, detail, percent) {
     if (statusEl) statusEl.textContent = status;
     if (detailEl) detailEl.textContent = detail || '';
     if (fillEl) fillEl.style.width = `${percent}%`;
+    setBulkExportBusy(true);
 }
 
 // Hide export progress modal
-function hideExportProgress() {
+function hideExportProgress(completed = true) {
     const modal = document.getElementById('export-progress-modal');
     if (modal) modal.classList.remove('visible');
+    setBulkExportBusy(false);
+    if (completed) setWorkspaceStatus('saved', 'Export ready', 1800);
 }
 
 // Export all screenshots for a specific language
