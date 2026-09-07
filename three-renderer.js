@@ -11,6 +11,7 @@ let orbitControls = null;
 let isThreeJSInitialized = false;
 let phoneModelLoaded = false;
 let phoneModelLoading = false;
+let phoneModelLoadRequestId = 0;
 
 // Screen texture for the screenshot
 let screenTexture = null;
@@ -219,12 +220,21 @@ function loadPhoneModel() {
     if (phoneModelLoading) return; // Prevent double loading
     phoneModelLoading = true;
 
-    const config = deviceConfigs[currentDeviceModel] || deviceConfigs.iphone;
+    const deviceType = currentDeviceModel;
+    const requestId = ++phoneModelLoadRequestId;
+    const config = deviceConfigs[deviceType] || deviceConfigs.iphone;
     const loader = new THREE.GLTFLoader();
 
     loader.load(
         config.modelPath,
         (gltf) => {
+            if (requestId !== phoneModelLoadRequestId) {
+                gltf.scene.traverse(child => {
+                    child.geometry?.dispose?.();
+                    child.material?.dispose?.();
+                });
+                return;
+            }
             phoneModelLoading = false;
             phoneModel = gltf.scene;
 
@@ -341,6 +351,9 @@ function loadPhoneModel() {
             console.log('Loading phone model... ' + percent + '%');
         },
         (error) => {
+            if (requestId !== phoneModelLoadRequestId) return;
+            phoneModelLoading = false;
+            phoneModelLoaded = false;
             console.error('Error loading phone model:', error);
         }
     );
@@ -360,7 +373,8 @@ function switchPhoneModel(deviceType) {
 
     // Update current device type
     currentDeviceModel = deviceType;
-    phoneModelLoading = false; // Reset so we can load the new one
+    phoneModelLoading = true;
+    const requestId = ++phoneModelLoadRequestId;
 
     // Remove current pivot (which contains the model) from scene
     if (phonePivot && threeScene) {
@@ -395,6 +409,14 @@ function switchPhoneModel(deviceType) {
     loader.load(
         config.modelPath,
         (gltf) => {
+            if (requestId !== phoneModelLoadRequestId) {
+                gltf.scene.traverse(child => {
+                    child.geometry?.dispose?.();
+                    child.material?.dispose?.();
+                });
+                return;
+            }
+            phoneModelLoading = false;
             phoneModel = gltf.scene;
 
             // Center and scale the model
@@ -456,6 +478,9 @@ function switchPhoneModel(deviceType) {
             console.log('Loading ' + deviceType + ' model... ' + percent + '%');
         },
         (error) => {
+            if (requestId !== phoneModelLoadRequestId) return;
+            phoneModelLoading = false;
+            phoneModelLoaded = false;
             console.error('Error loading ' + deviceType + ' model:', error);
         }
     );

@@ -1,5 +1,5 @@
 // Versioned scene templates inspired by bold editorial App Store screenshot layouts.
-const TEMPLATE_CATALOG_VERSION = 3;
+const TEMPLATE_CATALOG_VERSION = 4;
 
 const TIDAL_DEVICE_STYLE = {
   cornerRadius: 32,
@@ -279,6 +279,148 @@ const APP_TEMPLATES = [
     shapes: [{ type: 'rectangle', x: 25, y: 50, width: 50, height: 100, fill: '#5144F5', rotation: 0, layer: 'behind-screenshot', opacity: 100 }],
     devices: [{ source: 'current', scale: 72, x: 56, y: 54, rotation: 0, perspective: 0 }],
     text: { position: 'top', offsetY: 6, blockX: 72, blockWidth: 46, align: 'center', headlineSize: 94, headlineWeight: '700', headlineColor: '#17171B', subheadlineColor: '#17171B' }
+  },
+  {
+    id: 'pulse-portrait',
+    name: 'Pulse Portrait',
+    description: 'Lifestyle portrait with a feathered photo, glowing pulse, and angled iPhone',
+    category: 'Lifestyle Editorial',
+    version: 1,
+    palette: ['#F7F3FC', '#DDE9F8', '#17122F'],
+    previewCopy: {
+      headline: ['Your Library,', 'Your Audio'],
+      subheadline: ['All your saved', 'listening clips in', 'one place.']
+    },
+    photoPolicy: 'preserve-existing',
+    background: {
+      type: 'gradient',
+      solid: '#F7F3FC',
+      image: null,
+      imageSrc: null,
+      imageFit: 'cover',
+      imageBlur: 0,
+      overlayColor: '#000000',
+      overlayOpacity: 0,
+      noise: false,
+      noiseIntensity: 8,
+      gradient: {
+        angle: 112,
+        stops: [
+          { color: '#FAF6FC', position: 0 },
+          { color: '#E6EDF8', position: 58 },
+          { color: '#D8CAFA', position: 100 }
+        ]
+      },
+      photo: {
+        enabled: true,
+        label: 'Lifestyle photo',
+        image: null,
+        imageSrc: null,
+        fit: 'cover',
+        focalX: 28,
+        focalY: 54,
+        zoom: 112,
+        opacity: 100,
+        blur: 0,
+        feather: {
+          enabled: true,
+          start: 19,
+          end: 44,
+          rightEnabled: true,
+          rightStart: 78,
+          rightEnd: 100,
+          rightEndOpacity: 0,
+          bottomEnabled: true,
+          bottomStart: 88,
+          bottomEnd: 100,
+          bottomEndOpacity: 0
+        }
+      }
+    },
+    shapes: [
+      {
+        type: 'pulse',
+        name: 'Pulse glow',
+        x: 54,
+        y: 43,
+        width: 112,
+        height: 9,
+        fill: '#B89CFF',
+        opacity: 76,
+        layer: 'behind-screenshot',
+        lineWidth: 5,
+        glowBlur: 38,
+        glowOpacity: 74,
+        cycles: 2.65,
+        phase: 0,
+        taper: 1.55
+      },
+      {
+        type: 'pulse',
+        name: 'Pulse echo',
+        x: 54,
+        y: 43,
+        width: 112,
+        height: 6,
+        fill: '#F0E8FF',
+        opacity: 42,
+        layer: 'behind-screenshot',
+        lineWidth: 2,
+        glowBlur: 22,
+        glowOpacity: 52,
+        cycles: 2.65,
+        phase: 0.5,
+        taper: 1.55
+      }
+    ],
+    devices: [
+      {
+        source: 'current',
+        sourceOffset: 0,
+        scale: 83,
+        x: 165,
+        y: 98,
+        rotation: 0,
+        perspective: 0,
+        opacity: 100,
+        use3D: true,
+        device3D: 'iphone',
+        frameColor: 'natural',
+        rotation3D: { x: 2, y: -38, z: -2 }
+      }
+    ],
+    previewDevices: [
+      {
+        positionMode: 'canvas',
+        centerX: 0.77,
+        centerY: 0.64,
+        scale: 78,
+        previewWidth: 47,
+        previewAspect: 2.78,
+        rotation: -2,
+        perspective: 0
+      }
+    ],
+    text: {
+      headlineEnabled: true,
+      subheadlineEnabled: true,
+      perLanguageLayout: false,
+      position: 'top',
+      offsetY: 6,
+      lineHeight: 138,
+      blockX: 38,
+      blockWidth: 60,
+      align: 'left',
+      headlineFont: "-apple-system, BlinkMacSystemFont, 'SF Pro Display'",
+      headlineSize: 126,
+      headlineWeight: '800',
+      headlineColor: '#100B2D',
+      subheadlineFont: "-apple-system, BlinkMacSystemFont, 'SF Pro Display'",
+      subheadlineSize: 58,
+      subheadlineWeight: '400',
+      subheadlineColor: '#17132F',
+      subheadlineOpacity: 100
+    }
   },
   {
     id: 'tidal-relay', name: 'Tidal Relay', description: 'Balanced diagonal device handoff', category: 'Sequences', type: 'sequence', version: 1,

@@ -1,3 +1,55 @@
+function createDefaultPhotoLayer(overrides = {}) {
+    const source = overrides && typeof overrides === 'object' ? overrides : {};
+    const liveImage = source.image || null;
+    const feather = source.feather && typeof source.feather === 'object' ? source.feather : {};
+    const topFeather = feather.top && typeof feather.top === 'object' ? feather.top : {};
+    const rightFeather = feather.right && typeof feather.right === 'object' ? feather.right : {};
+    const bottomFeather = feather.bottom && typeof feather.bottom === 'object' ? feather.bottom : {};
+    const serializable = { ...source };
+    delete serializable.image;
+    delete serializable.feather;
+
+    return {
+        enabled: false,
+        label: 'Photo layer',
+        image: liveImage,
+        imageSrc: liveImage?.src || source.imageSrc || null,
+        fit: 'cover',
+        focalX: 50,
+        focalY: 50,
+        zoom: 100,
+        opacity: 100,
+        blur: 0,
+        feather: {
+            enabled: false,
+            start: 18,
+            end: 42,
+            rightEnabled: false,
+            rightStart: 72,
+            rightEnd: 100,
+            rightEndOpacity: 0,
+            bottomEnabled: false,
+            bottomStart: 90,
+            bottomEnd: 100,
+            bottomEndOpacity: 25,
+            ...feather,
+            start: feather.start ?? topFeather.start ?? 18,
+            end: feather.end ?? topFeather.end ?? 42,
+            rightEnabled: feather.rightEnabled ?? Boolean(feather.right),
+            rightStart: feather.rightStart ?? rightFeather.start ?? 72,
+            rightEnd: feather.rightEnd ?? rightFeather.end ?? 100,
+            rightEndOpacity: feather.rightEndOpacity ?? rightFeather.endOpacity ?? 0,
+            bottomEnabled: feather.bottomEnabled ?? Boolean(feather.bottom),
+            bottomStart: feather.bottomStart ?? bottomFeather.start ?? 90,
+            bottomEnd: feather.bottomEnd ?? bottomFeather.end ?? 100,
+            bottomEndOpacity: feather.bottomEndOpacity ?? bottomFeather.endOpacity ?? 25
+        },
+        ...serializable,
+        image: liveImage,
+        imageSrc: liveImage?.src || source.imageSrc || null
+    };
+}
+
 // State management
 const state = {
     screenshots: [],
@@ -27,6 +79,7 @@ const state = {
             imageBlur: 0,
             overlayColor: '#000000',
             overlayOpacity: 0,
+            photo: createDefaultPhotoLayer(),
             noise: false,
             noiseIntensity: 10
         },
@@ -203,10 +256,20 @@ function undoLastTemplate() {
 }
 
 function templateShapeToElement(shape) {
-    return { id: crypto.randomUUID(), name: shape.type === 'ellipse' ? 'Ellipse' : 'Rectangle',
-        type: 'shape', shapeType: shape.type, x: shape.x, y: shape.y, width: shape.width,
-        height: shape.height, rotation: shape.rotation || 0, opacity: shape.opacity ?? 100,
-        fill: shape.fill, cornerRadius: shape.cornerRadius || 0, layer: shape.layer || 'behind-screenshot' };
+    const shapeProperties = JSON.parse(JSON.stringify(shape || {}));
+    const shapeType = shapeProperties.type || 'rectangle';
+    delete shapeProperties.type;
+    return {
+        ...shapeProperties,
+        id: crypto.randomUUID(),
+        name: shapeProperties.name || (shapeType === 'ellipse' ? 'Ellipse' : shapeType === 'pulse' ? 'Pulse' : 'Rectangle'),
+        type: 'shape',
+        shapeType,
+        rotation: shapeProperties.rotation || 0,
+        opacity: shapeProperties.opacity ?? 100,
+        cornerRadius: shapeProperties.cornerRadius || 0,
+        layer: shapeProperties.layer || 'behind-screenshot'
+    };
 }
 
 function getTemplateScenes(template) {
@@ -345,8 +408,60 @@ function ensureDeviceMetadata() {
     normalizeDeviceRenderingModes();
 }
 
+function getReusablePhotoMedia(background) {
+    const photo = createDefaultPhotoLayer(background?.photo);
+    if (photo.image || photo.imageSrc) {
+        return { image: photo.image || null, imageSrc: photo.image?.src || photo.imageSrc || null };
+    }
+    if (background?.type === 'image' && (background.image || background.imageSrc)) {
+        return { image: background.image || null, imageSrc: background.image?.src || background.imageSrc || null };
+    }
+    return null;
+}
+
+function applyTemplateBackground(background, scene, mode) {
+    const existing = cloneBackground(background);
+    if (mode === 'layout' || !scene?.background) return existing;
+
+    const templateBackground = scene.background;
+    const reusablePhotoMedia = getReusablePhotoMedia(background);
+    const serializedTemplate = JSON.parse(JSON.stringify({
+        ...templateBackground,
+        image: null,
+        photo: undefined
+    }));
+    const next = { ...existing, ...serializedTemplate };
+
+    if (Object.prototype.hasOwnProperty.call(templateBackground, 'image')) {
+        next.image = templateBackground.image || null;
+        next.imageSrc = templateBackground.image?.src || templateBackground.imageSrc || null;
+    } else if (mode === 'replace') {
+        next.image = null;
+        next.imageSrc = null;
+    }
+
+    if (templateBackground.photo) {
+        next.photo = createDefaultPhotoLayer(templateBackground.photo);
+        if (scene.photoPolicy === 'preserve-existing' && mode !== 'replace' && reusablePhotoMedia) {
+            next.photo.image = reusablePhotoMedia.image;
+            next.photo.imageSrc = reusablePhotoMedia.imageSrc;
+            next.photo.enabled = true;
+            if (!next.photo.image && next.photo.imageSrc) {
+                next.photo.image = hydrateBackgroundImage(next.photo, () => updateCanvas());
+            }
+        }
+    } else if (mode === 'replace') {
+        next.photo = createDefaultPhotoLayer();
+    } else {
+        next.photo = createDefaultPhotoLayer(existing.photo);
+        next.photo.enabled = false;
+    }
+
+    return next;
+}
+
 function applyTemplateScene(screenshot, scene, targetIndex, mode, isSequence) {
-    if (mode !== 'layout') screenshot.background = { ...cloneBackground(screenshot.background), ...JSON.parse(JSON.stringify(scene.background)) };
+    screenshot.background = applyTemplateBackground(screenshot.background, scene, mode);
     const existingNonTemplateElements = (screenshot.elements || []).filter(el => !el.templateElement);
     screenshot.elements = existingNonTemplateElements.concat((scene.shapes || []).map(shape => ({ ...templateShapeToElement(shape), templateElement: true })));
     screenshot.devices = resolveTemplateDevices(scene.devices, targetIndex);
@@ -417,9 +532,13 @@ function applyTemplate(templateId, mode = 'all') {
     selectedDeviceId = null;
     closeTemplateGallery();
     syncUIWithState(); updateElementsList(); updateScreenshotList(); updateCanvas();
+    const appliedBackground = state.screenshots[startIndex]?.background;
+    const needsPhoto = Boolean(template.background?.photo && !getReusablePhotoMedia(appliedBackground));
     showTemplateToast(template.type === 'sequence'
         ? `${template.name} applied to screens ${startIndex + 1}–${startIndex + scenes.length}.`
-        : `${template.name} applied.`, true);
+        : needsPhoto
+            ? `${template.name} applied. Add a lifestyle photo in Background → Photo Layer.`
+            : `${template.name} applied.`, true);
     return true;
 }
 
@@ -552,6 +671,166 @@ function closeTemplateGallery({ restoreFocus = true } = {}) {
     templateGalleryReturnFocus = null;
 }
 
+function createTemplatePhotoPlaceholder(dims) {
+    const placeholder = document.createElement('canvas');
+    placeholder.width = dims.width;
+    placeholder.height = dims.height;
+    const placeholderContext = placeholder.getContext('2d');
+    const sky = placeholderContext.createLinearGradient(0, 0, dims.width, dims.height);
+    sky.addColorStop(0, '#F6E8D3');
+    sky.addColorStop(0.52, '#D8D2B9');
+    sky.addColorStop(1, '#7A8066');
+    placeholderContext.fillStyle = sky;
+    placeholderContext.fillRect(0, 0, dims.width, dims.height);
+
+    placeholderContext.save();
+    placeholderContext.fillStyle = 'rgba(255, 239, 189, .86)';
+    placeholderContext.shadowColor = '#FFE9AC';
+    placeholderContext.shadowBlur = dims.width * 0.22;
+    placeholderContext.beginPath();
+    placeholderContext.arc(dims.width * 0.12, dims.height * 0.49, dims.width * 0.08, 0, Math.PI * 2);
+    placeholderContext.fill();
+    placeholderContext.restore();
+
+    const ground = placeholderContext.createLinearGradient(0, dims.height * 0.46, 0, dims.height);
+    ground.addColorStop(0, 'rgba(108, 119, 84, .36)');
+    ground.addColorStop(1, '#656A52');
+    placeholderContext.fillStyle = ground;
+    placeholderContext.fillRect(0, dims.height * 0.45, dims.width, dims.height * 0.55);
+    placeholderContext.fillStyle = 'rgba(233, 218, 184, .52)';
+    placeholderContext.beginPath();
+    placeholderContext.moveTo(dims.width * 0.12, dims.height);
+    placeholderContext.quadraticCurveTo(dims.width * 0.32, dims.height * 0.7, dims.width * 0.43, dims.height * 0.47);
+    placeholderContext.lineTo(dims.width * 0.58, dims.height * 0.47);
+    placeholderContext.quadraticCurveTo(dims.width * 0.48, dims.height * 0.7, dims.width * 0.44, dims.height);
+    placeholderContext.closePath();
+    placeholderContext.fill();
+
+    const runnerX = dims.width * 0.32;
+    const runnerY = dims.height * 0.68;
+    placeholderContext.save();
+    placeholderContext.strokeStyle = '#334354';
+    placeholderContext.fillStyle = '#394C60';
+    placeholderContext.lineCap = 'round';
+    placeholderContext.lineWidth = dims.width * 0.035;
+    placeholderContext.beginPath();
+    placeholderContext.arc(runnerX, runnerY - dims.height * 0.16, dims.width * 0.037, 0, Math.PI * 2);
+    placeholderContext.fillStyle = '#B88868';
+    placeholderContext.fill();
+    placeholderContext.fillStyle = '#49667A';
+    placeholderContext.beginPath();
+    placeholderContext.moveTo(runnerX - dims.width * 0.06, runnerY - dims.height * 0.115);
+    placeholderContext.quadraticCurveTo(runnerX, runnerY - dims.height * 0.145, runnerX + dims.width * 0.052, runnerY - dims.height * 0.105);
+    placeholderContext.lineTo(runnerX + dims.width * 0.035, runnerY + dims.height * 0.04);
+    placeholderContext.lineTo(runnerX - dims.width * 0.04, runnerY + dims.height * 0.04);
+    placeholderContext.closePath();
+    placeholderContext.fill();
+    placeholderContext.strokeStyle = '#B88868';
+    placeholderContext.beginPath();
+    placeholderContext.moveTo(runnerX - dims.width * 0.035, runnerY - dims.height * 0.08);
+    placeholderContext.lineTo(runnerX - dims.width * 0.11, runnerY - dims.height * 0.015);
+    placeholderContext.moveTo(runnerX + dims.width * 0.035, runnerY - dims.height * 0.075);
+    placeholderContext.lineTo(runnerX + dims.width * 0.1, runnerY - dims.height * 0.02);
+    placeholderContext.stroke();
+    placeholderContext.strokeStyle = '#293947';
+    placeholderContext.lineWidth = dims.width * 0.045;
+    placeholderContext.beginPath();
+    placeholderContext.moveTo(runnerX - dims.width * 0.015, runnerY + dims.height * 0.035);
+    placeholderContext.lineTo(runnerX - dims.width * 0.075, runnerY + dims.height * 0.19);
+    placeholderContext.moveTo(runnerX + dims.width * 0.02, runnerY + dims.height * 0.035);
+    placeholderContext.lineTo(runnerX + dims.width * 0.08, runnerY + dims.height * 0.17);
+    placeholderContext.stroke();
+    placeholderContext.restore();
+    return placeholder;
+}
+
+function drawTemplatePreviewCopy(context, dims, scene) {
+    if (!scene.previewCopy) return;
+    const left = dims.width * 0.078;
+    const headlineSize = dims.width * 0.103;
+    context.save();
+    context.textAlign = 'left';
+    context.textBaseline = 'top';
+    context.fillStyle = scene.text?.headlineColor || '#100B2D';
+    context.font = `800 ${headlineSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    (scene.previewCopy.headline || []).forEach((line, index) => {
+        context.fillText(line, left, dims.height * 0.065 + index * headlineSize * 1.03);
+    });
+    const subheadlineSize = dims.width * 0.049;
+    context.fillStyle = scene.text?.subheadlineColor || '#17132F';
+    context.font = `400 ${subheadlineSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    (scene.previewCopy.subheadline || []).forEach((line, index) => {
+        context.fillText(line, left, dims.height * 0.21 + index * subheadlineSize * 1.28);
+    });
+    context.restore();
+}
+
+function drawTemplateDevicePlaceholder(context, dims, device, detailed = false, widthFactor = 0.48) {
+    const widthPercent = Number.isFinite(device.previewWidth)
+        ? device.previewWidth / 100
+        : (device.scale / 100) * widthFactor;
+    const w = dims.width * widthPercent;
+    const h = w * (Number(device.previewAspect) || 2.08);
+    const centerX = device.positionMode === 'canvas' ? dims.width * device.centerX : dims.width * device.x / 100;
+    const centerY = device.positionMode === 'canvas' ? dims.height * device.centerY : dims.height * device.y / 100;
+    const radius = Math.min(w * 0.16, 16);
+    context.save();
+    context.translate(centerX, centerY);
+    context.rotate((device.rotation || 0) * Math.PI / 180);
+    context.shadowColor = '#1A163A55';
+    context.shadowBlur = detailed ? 18 : 12;
+    if (detailed) {
+        const rail = context.createLinearGradient(-w / 2, 0, w / 2, 0);
+        rail.addColorStop(0, '#89847B');
+        rail.addColorStop(0.58, '#E3DED4');
+        rail.addColorStop(1, '#918B83');
+        context.fillStyle = rail;
+        context.beginPath();
+        context.roundRect(-w / 2 + 7, -h / 2 - 2, w, h + 4, radius);
+        context.fill();
+    }
+    context.fillStyle = '#15151A';
+    context.beginPath();
+    context.roundRect(-w / 2, -h / 2, w, h, radius);
+    context.fill();
+    context.shadowColor = 'transparent';
+    const inset = Math.max(4, w * 0.045);
+    const screen = context.createLinearGradient(0, -h / 2, 0, h / 2);
+    screen.addColorStop(0, '#EDF7FB');
+    screen.addColorStop(1, '#F4EFFF');
+    context.fillStyle = screen;
+    context.beginPath();
+    context.roundRect(-w / 2 + inset, -h / 2 + inset, w - inset * 2, h - inset * 2, Math.max(6, radius - inset));
+    context.fill();
+
+    if (detailed) {
+        context.fillStyle = '#19152E';
+        context.beginPath();
+        context.roundRect(-w * 0.18, -h / 2 + inset * 1.7, w * 0.36, Math.max(4, h * 0.025), 9);
+        context.fill();
+        context.font = `700 ${Math.max(8, w * 0.105)}px -apple-system, sans-serif`;
+        context.fillText('Library', -w * 0.39, -h * 0.37);
+        for (let row = 0; row < 4; row += 1) {
+            const rowY = -h * 0.26 + row * h * 0.18;
+            context.fillStyle = 'rgba(255,255,255,.92)';
+            context.beginPath();
+            context.roundRect(-w * 0.4, rowY, w * 0.8, h * 0.135, 5);
+            context.fill();
+            context.strokeStyle = row % 2 ? '#7F78AE' : '#9D97BA';
+            context.lineWidth = 1;
+            context.beginPath();
+            for (let step = 0; step <= 16; step += 1) {
+                const lineX = -w * 0.24 + step * w * 0.031;
+                const lineY = rowY + h * 0.055 + Math.sin(step * 1.8 + row) * h * 0.013;
+                if (!step) context.moveTo(lineX, lineY);
+                else context.lineTo(lineX, lineY);
+            }
+            context.stroke();
+        }
+    }
+    context.restore();
+}
+
 function renderTemplateThumbnail(template, element) {
     const scenes = getTemplateScenes(template);
     const isSequence = template.type === 'sequence';
@@ -570,16 +849,20 @@ function renderTemplateThumbnail(template, element) {
         cctx.translate(panelX, 0);
         cctx.beginPath(); cctx.rect(0, 0, dims.width, dims.height); cctx.clip();
         drawBackgroundToContext(cctx, dims, scene.background);
+        if (scene.background?.photo?.enabled && !scene.background.photo.image) {
+            const placeholder = createTemplatePhotoPlaceholder(dims);
+            drawPhotoLayerToContext(cctx, dims, { ...scene.background.photo, image: placeholder });
+        }
         drawElementsToContext(cctx, dims, (scene.shapes || []).map(templateShapeToElement), 'behind-screenshot');
-        (scene.devices || []).forEach(device => {
-            const w = dims.width * (device.scale / 100) * (isSequence ? .82 : .48);
-            const h = w * 2.08;
-            const centerX = device.positionMode === 'canvas' ? dims.width * device.centerX : dims.width * device.x / 100;
-            const centerY = device.positionMode === 'canvas' ? dims.height * device.centerY : dims.height * device.y / 100;
-            cctx.save(); cctx.translate(centerX, centerY); cctx.rotate((device.rotation || 0) * Math.PI / 180);
-            cctx.shadowColor='#0006'; cctx.shadowBlur=12; cctx.fillStyle='#141419'; cctx.beginPath(); cctx.roundRect(-w/2,-h/2,w,h,14); cctx.fill();
-            cctx.shadowColor='transparent'; cctx.fillStyle='#f8f8fb'; cctx.beginPath(); cctx.roundRect(-w/2+5,-h/2+5,w-10,h-10,10); cctx.fill(); cctx.restore();
-        });
+        const thumbnailDevices = scene.previewDevices || scene.devices || [];
+        thumbnailDevices.forEach(device => drawTemplateDevicePlaceholder(
+            cctx,
+            dims,
+            device,
+            Boolean(scene.previewDevices),
+            isSequence ? 0.82 : 0.48
+        ));
+        drawTemplatePreviewCopy(cctx, dims, scene);
         cctx.restore();
     });
     element.style.backgroundImage = `url(${c.toDataURL('image/png')})`; element.classList.add('is-rendered');
@@ -601,11 +884,12 @@ function openTemplateGallery() {
             ? availability.message
             : isSequence
                 ? (template.description || 'Connected device composition')
-                : template.category;
+                : (template.description || template.category);
+        const singleScreenAction = template.background?.photo ? 'Apply + add photo' : 'Apply template';
         return `<button type="button" class="template-card${isSequence ? ' template-card-sequence' : ''}" data-template="${template.id}"${isUnavailable ? ' aria-disabled="true"' : ''}>
             <span class="template-preview${isSequence ? ' is-sequence' : ''}" aria-hidden="true" style="--c1:${template.palette[0]};--c2:${template.palette[1]};--ink:${template.palette[2]}"><i></i><b></b><em></em></span>
             <span class="template-card-heading"><strong>${template.name}</strong>${isSequence ? `<span class="template-badge">${screenCount}+ screens</span>` : ''}</span>
-            <small>${helper}</small><span class="template-card-action">${isSequence ? `Start with ${screenCount} screens` : 'Apply template'}</span>
+            <small>${helper}</small><span class="template-card-action">${isSequence ? `Start with ${screenCount} screens` : singleScreenAction}</span>
         </button>`;
     };
     const sequenceCards = sequenceTemplates.map(renderCard).join('');
@@ -1188,26 +1472,38 @@ function formatValue(num) {
 }
 
 function serializeBackground(background) {
-    const serialized = JSON.parse(JSON.stringify({
-        ...background,
+    const source = background || state.defaults.background;
+    const photo = createDefaultPhotoLayer(source?.photo);
+    const serializedPhoto = JSON.parse(JSON.stringify({
+        ...photo,
         image: null,
-        imageSrc: background?.image?.src || background?.imageSrc || null
+        imageSrc: photo.image?.src || photo.imageSrc || null
+    }));
+    const serialized = JSON.parse(JSON.stringify({
+        ...source,
+        image: null,
+        imageSrc: source?.image?.src || source?.imageSrc || null,
+        photo: serializedPhoto
     }));
     serialized.image = null;
+    serialized.photo.image = null;
     return serialized;
+}
+
+function hydrateBackgroundImage(target, onLoad) {
+    if (!target?.imageSrc) return null;
+    const img = new Image();
+    img.onload = onLoad;
+    img.src = target.imageSrc;
+    return img;
 }
 
 function hydrateBackground(background) {
     const hydrated = JSON.parse(JSON.stringify(background || state.defaults.background));
     hydrated.imageSrc = hydrated.imageSrc || null;
-    hydrated.image = null;
-
-    if (hydrated.imageSrc) {
-        const img = new Image();
-        img.onload = () => updateCanvas();
-        img.src = hydrated.imageSrc;
-        hydrated.image = img;
-    }
+    hydrated.image = hydrateBackgroundImage(hydrated, () => updateCanvas());
+    hydrated.photo = createDefaultPhotoLayer(hydrated.photo);
+    hydrated.photo.image = hydrateBackgroundImage(hydrated.photo, () => updateCanvas());
 
     return hydrated;
 }
@@ -1216,11 +1512,13 @@ function cloneBackground(background) {
     const cloned = serializeBackground(background);
     if (background?.image) {
         cloned.image = background.image;
-    } else if (cloned.imageSrc) {
-        const img = new Image();
-        img.onload = () => updateCanvas();
-        img.src = cloned.imageSrc;
-        cloned.image = img;
+    } else {
+        cloned.image = hydrateBackgroundImage(cloned, () => updateCanvas());
+    }
+    if (background?.photo?.image) {
+        cloned.photo.image = background.photo.image;
+    } else {
+        cloned.photo.image = hydrateBackgroundImage(cloned.photo, () => updateCanvas());
     }
     return cloned;
 }
@@ -1232,6 +1530,7 @@ function setBackground(key, value) {
             const parts = key.split('.');
             let obj = screenshot.background;
             for (let i = 0; i < parts.length - 1; i++) {
+                if (!obj[parts[i]] || typeof obj[parts[i]] !== 'object') obj[parts[i]] = {};
                 obj = obj[parts[i]];
             }
             obj[parts[parts.length - 1]] = value;
@@ -3464,10 +3763,12 @@ function resetStateToDefaults() {
             },
             solid: '#1a1a2e',
             image: null,
+            imageSrc: null,
             imageFit: 'cover',
             imageBlur: 0,
             overlayColor: '#000000',
             overlayOpacity: 0,
+            photo: createDefaultPhotoLayer(),
             noise: false,
             noiseIntensity: 10
         },
@@ -3659,12 +3960,12 @@ function duplicateScreenshot(index) {
     const clone = JSON.parse(JSON.stringify({
         name: original.name,
         deviceType: original.deviceType,
-        background: original.background,
         screenshot: original.screenshot,
         text: original.text,
         overrides: original.overrides
     }));
     clone.id = crypto.randomUUID();
+    clone.background = cloneBackground(original.background);
     clone.elements = cloneTemplateElements(original.elements || []).map(element => ({ ...element, id: crypto.randomUUID() }));
     clone.popouts = JSON.parse(JSON.stringify(original.popouts || [])).map(popout => ({ ...popout, id: crypto.randomUUID() }));
     clone.devices = JSON.parse(JSON.stringify(original.devices || [])).map(device => {
@@ -3756,6 +4057,75 @@ function updateFrameColorSwatches(deviceType, activeColorId) {
     });
 }
 
+function setSwitchState(button, enabled, controlsVisible = enabled) {
+    if (!button) return;
+    button.classList.toggle('active', enabled);
+    button.setAttribute('aria-checked', String(enabled));
+    if (button.hasAttribute('aria-expanded')) button.setAttribute('aria-expanded', String(controlsVisible));
+}
+
+function syncPhotoLayerUI(background) {
+    if (!background) return;
+    background.photo = createDefaultPhotoLayer(background.photo);
+    const photo = background.photo;
+    const feather = photo.feather;
+    const layerToggle = document.getElementById('photo-layer-toggle');
+    const layerOptions = document.getElementById('photo-layer-options');
+    const featherToggle = document.getElementById('photo-layer-feather-toggle');
+    const featherOptions = document.getElementById('photo-layer-feather-options');
+    setSwitchState(layerToggle, Boolean(photo.enabled), Boolean(photo.enabled));
+    setSwitchState(featherToggle, Boolean(feather.enabled), Boolean(photo.enabled && feather.enabled));
+    if (layerOptions) layerOptions.style.display = photo.enabled ? 'block' : 'none';
+    if (featherOptions) featherOptions.style.display = photo.enabled && feather.enabled ? 'block' : 'none';
+
+    const photoSource = photo.image?.src || photo.imageSrc || '';
+    const preview = document.getElementById('photo-layer-preview');
+    const upload = document.getElementById('photo-layer-upload');
+    const remove = document.getElementById('photo-layer-remove');
+    if (preview) {
+        if (photoSource && preview.getAttribute('src') !== photoSource) preview.src = photoSource;
+        if (!photoSource) preview.removeAttribute('src');
+        preview.alt = photoSource ? `${photo.label || 'Photo layer'} preview` : 'Selected photo layer preview';
+    }
+    upload?.classList.toggle('has-photo', Boolean(photoSource));
+    if (remove) remove.disabled = !photoSource;
+
+    const syncRange = (id, value, suffix = '%') => {
+        const input = document.getElementById(id);
+        const output = document.getElementById(`${id}-value`);
+        if (input) input.value = value;
+        if (output) output.textContent = `${formatValue(value)}${suffix}`;
+    };
+    syncRange('photo-layer-focal-x', photo.focalX);
+    syncRange('photo-layer-focal-y', photo.focalY);
+    syncRange('photo-layer-zoom', photo.zoom);
+    syncRange('photo-layer-opacity', photo.opacity);
+    syncRange('photo-layer-feather-start', feather.start);
+    syncRange('photo-layer-feather-end', feather.end);
+}
+
+let deferredPhotoLayerSaveTimer = null;
+
+function schedulePhotoLayerSave() {
+    clearTimeout(deferredPhotoLayerSaveTimer);
+    deferredPhotoLayerSaveTimer = setTimeout(() => {
+        deferredPhotoLayerSaveTimer = null;
+        saveState();
+    }, 260);
+}
+
+function flushPhotoLayerSave() {
+    if (!deferredPhotoLayerSaveTimer) return;
+    clearTimeout(deferredPhotoLayerSaveTimer);
+    deferredPhotoLayerSaveTimer = null;
+    saveState();
+}
+
+window.addEventListener('pagehide', flushPhotoLayerSave);
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushPhotoLayerSave();
+});
+
 // Sync UI controls with current state
 function syncUIWithState() {
     // Update language button
@@ -3822,6 +4192,7 @@ function syncUIWithState() {
     document.getElementById('bg-overlay-hex').value = bg.overlayColor;
     document.getElementById('bg-overlay-opacity').value = bg.overlayOpacity;
     document.getElementById('bg-overlay-opacity-value').textContent = formatValue(bg.overlayOpacity) + '%';
+    syncPhotoLayerUI(bg);
 
     // Noise
     document.getElementById('noise-toggle').classList.toggle('active', bg.noise);
@@ -4474,6 +4845,8 @@ function setupElementCanvasDrag() {
                     elHeight = elWidth; // square bounding box
                 } else if (el.type === 'graphic' && el.image) {
                     elHeight = elWidth * (el.image.height / el.image.width);
+                } else if (el.type === 'shape') {
+                    elHeight = dims.height * ((el.height ?? el.width) / 100);
                 } else {
                     elHeight = el.fontSize * 1.5;
                 }
@@ -6017,6 +6390,98 @@ function setupEventListeners() {
         setBackground('overlayOpacity', parseInt(e.target.value));
         document.getElementById('bg-overlay-opacity-value').textContent = formatValue(e.target.value) + '%';
         updateCanvas();
+    });
+
+    // Optional lifestyle photo layer
+    const getEditablePhotoLayer = () => {
+        const background = getBackground();
+        background.photo = createDefaultPhotoLayer(background.photo);
+        return background.photo;
+    };
+    const photoLayerToggle = document.getElementById('photo-layer-toggle');
+    const photoLayerUpload = document.getElementById('photo-layer-upload');
+    const photoLayerInput = document.getElementById('photo-layer-input');
+    const photoLayerRemove = document.getElementById('photo-layer-remove');
+    const photoFeatherToggle = document.getElementById('photo-layer-feather-toggle');
+
+    photoLayerToggle?.addEventListener('click', () => {
+        const photo = getEditablePhotoLayer();
+        photo.enabled = !photo.enabled;
+        syncPhotoLayerUI(getBackground());
+        updateCanvas();
+    });
+    photoLayerUpload?.addEventListener('click', () => photoLayerInput?.click());
+    photoLayerInput?.addEventListener('change', (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onerror = () => {
+            event.target.value = '';
+            showAppAlert('That photo could not be read. Try another PNG, JPG, or WebP image.', 'error');
+        };
+        reader.onload = () => {
+            const img = new Image();
+            img.onerror = () => {
+                event.target.value = '';
+                showAppAlert('That file is not a supported image.', 'error');
+            };
+            img.onload = () => {
+                const photo = getEditablePhotoLayer();
+                photo.image = img;
+                photo.imageSrc = reader.result;
+                photo.label = file.name || 'Lifestyle photo';
+                photo.enabled = true;
+                event.target.value = '';
+                syncPhotoLayerUI(getBackground());
+                updateCanvas();
+            };
+            img.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+    });
+    photoLayerRemove?.addEventListener('click', () => {
+        const photo = getEditablePhotoLayer();
+        photo.image = null;
+        photo.imageSrc = null;
+        photo.label = 'Photo layer';
+        photo.enabled = false;
+        if (photoLayerInput) photoLayerInput.value = '';
+        syncPhotoLayerUI(getBackground());
+        updateCanvas();
+    });
+    photoFeatherToggle?.addEventListener('click', () => {
+        const photo = getEditablePhotoLayer();
+        photo.feather.enabled = !photo.feather.enabled;
+        syncPhotoLayerUI(getBackground());
+        updateCanvas();
+    });
+
+    const bindPhotoRange = (id, property, { feather = false, constrain } = {}) => {
+        const input = document.getElementById(id);
+        input?.addEventListener('input', (event) => {
+            const photo = getEditablePhotoLayer();
+            const target = feather ? photo.feather : photo;
+            let value = Number(event.target.value);
+            if (constrain) value = constrain(value, photo);
+            event.target.value = value;
+            target[property] = value;
+            document.getElementById(`${id}-value`).textContent = `${formatValue(value)}%`;
+            updateCanvas({ persist: false });
+            schedulePhotoLayerSave();
+        });
+        input?.addEventListener('change', flushPhotoLayerSave);
+    };
+    bindPhotoRange('photo-layer-focal-x', 'focalX');
+    bindPhotoRange('photo-layer-focal-y', 'focalY');
+    bindPhotoRange('photo-layer-zoom', 'zoom');
+    bindPhotoRange('photo-layer-opacity', 'opacity');
+    bindPhotoRange('photo-layer-feather-start', 'start', {
+        feather: true,
+        constrain: (value, photo) => Math.min(value, Number(photo.feather.end) - 1)
+    });
+    bindPhotoRange('photo-layer-feather-end', 'end', {
+        feather: true,
+        constrain: (value, photo) => Math.max(value, Number(photo.feather.start) + 1)
     });
 
     // Noise toggle
@@ -8990,10 +9455,10 @@ function getCanvasDimensions() {
     return deviceDimensions[state.outputDevice];
 }
 
-function updateCanvas() {
+function updateCanvas(options = {}) {
     updateProofingMeta();
     normalizeDeviceRenderingModes();
-    saveState(); // Persist state on every update
+    if (options.persist !== false) saveState(); // Persist state on every committed update
     const dims = getCanvasDimensions();
     canvas.width = dims.width;
     canvas.height = dims.height;
@@ -9323,30 +9788,111 @@ function renderScreenshotToCanvas(index, targetCanvas, targetCtx, dims, previewS
     drawElementsToContext(targetCtx, dims, elements, 'above-text');
 }
 
+let photoLayerRenderCanvas = null;
+
+function clampPhotoPercent(value, fallback) {
+    const numeric = Number(value);
+    return Math.max(0, Math.min(100, Number.isFinite(numeric) ? numeric : fallback));
+}
+
+function applyPhotoFeatherMask(context, dims, feather) {
+    if (!feather?.enabled) return;
+    context.save();
+    context.globalCompositeOperation = 'destination-in';
+
+    const fillMask = (gradient) => {
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, dims.width, dims.height);
+    };
+    const addStops = (gradient, start, end, startAlpha, endAlpha) => {
+        const startPosition = clampPhotoPercent(start, 0) / 100;
+        const endPosition = Math.max(startPosition + 0.001, clampPhotoPercent(end, 100) / 100);
+        gradient.addColorStop(0, `rgba(255,255,255,${startAlpha})`);
+        gradient.addColorStop(Math.min(1, startPosition), `rgba(255,255,255,${startAlpha})`);
+        gradient.addColorStop(Math.min(1, endPosition), `rgba(255,255,255,${endAlpha})`);
+        gradient.addColorStop(1, `rgba(255,255,255,${endAlpha})`);
+    };
+
+    const topGradient = context.createLinearGradient(0, 0, 0, dims.height);
+    addStops(topGradient, feather.start, feather.end, 0, 1);
+    fillMask(topGradient);
+
+    if (feather.rightEnabled) {
+        const rightGradient = context.createLinearGradient(0, 0, dims.width, 0);
+        addStops(rightGradient, feather.rightStart, feather.rightEnd, 1,
+            clampPhotoPercent(feather.rightEndOpacity, 0) / 100);
+        fillMask(rightGradient);
+    }
+
+    if (feather.bottomEnabled) {
+        const bottomGradient = context.createLinearGradient(0, 0, 0, dims.height);
+        addStops(bottomGradient, feather.bottomStart, feather.bottomEnd, 1,
+            clampPhotoPercent(feather.bottomEndOpacity, 25) / 100);
+        fillMask(bottomGradient);
+    }
+    context.restore();
+}
+
+function drawPhotoLayerToContext(context, dims, photoSource) {
+    const photo = createDefaultPhotoLayer(photoSource);
+    const img = photo.image;
+    const imageWidth = img?.naturalWidth || img?.width || 0;
+    const imageHeight = img?.naturalHeight || img?.height || 0;
+    if (!photo.enabled || !img || !imageWidth || !imageHeight) return;
+
+    if (!photoLayerRenderCanvas) photoLayerRenderCanvas = document.createElement('canvas');
+    photoLayerRenderCanvas.width = dims.width;
+    photoLayerRenderCanvas.height = dims.height;
+    const photoContext = photoLayerRenderCanvas.getContext('2d');
+    photoContext.clearRect(0, 0, dims.width, dims.height);
+
+    const fit = photo.fit || 'cover';
+    const fitScale = fit === 'contain'
+        ? Math.min(dims.width / imageWidth, dims.height / imageHeight)
+        : Math.max(dims.width / imageWidth, dims.height / imageHeight);
+    const zoom = Math.max(0.01, Number(photo.zoom || 100) / 100);
+    const drawnWidth = imageWidth * fitScale * zoom;
+    const drawnHeight = imageHeight * fitScale * zoom;
+    const focalX = clampPhotoPercent(photo.focalX, 50) / 100;
+    const focalY = clampPhotoPercent(photo.focalY, 50) / 100;
+    const drawX = (dims.width - drawnWidth) * focalX;
+    const drawY = (dims.height - drawnHeight) * focalY;
+
+    photoContext.save();
+    photoContext.globalAlpha = clampPhotoPercent(photo.opacity, 100) / 100;
+    if (Number(photo.blur) > 0) photoContext.filter = `blur(${Number(photo.blur)}px)`;
+    photoContext.drawImage(img, drawX, drawY, drawnWidth, drawnHeight);
+    photoContext.restore();
+    applyPhotoFeatherMask(photoContext, dims, photo.feather);
+    context.drawImage(photoLayerRenderCanvas, 0, 0, dims.width, dims.height);
+}
+
 function drawBackgroundToContext(context, dims, bg) {
-    if (bg.type === 'gradient') {
-        const angle = bg.gradient.angle * Math.PI / 180;
+    const background = bg || state.defaults.background;
+    context.save();
+    if (background.type === 'gradient') {
+        const angle = (background.gradient?.angle || 0) * Math.PI / 180;
         const x1 = dims.width / 2 - Math.cos(angle) * dims.width;
         const y1 = dims.height / 2 - Math.sin(angle) * dims.height;
         const x2 = dims.width / 2 + Math.cos(angle) * dims.width;
         const y2 = dims.height / 2 + Math.sin(angle) * dims.height;
 
         const gradient = context.createLinearGradient(x1, y1, x2, y2);
-        bg.gradient.stops.forEach(stop => {
+        (background.gradient?.stops || [{ color: background.solid || '#1a1a2e', position: 0 }]).forEach(stop => {
             gradient.addColorStop(stop.position / 100, stop.color);
         });
 
         context.fillStyle = gradient;
         context.fillRect(0, 0, dims.width, dims.height);
-    } else if (bg.type === 'solid') {
-        context.fillStyle = bg.solid;
+    } else if (background.type === 'solid') {
+        context.fillStyle = background.solid || '#1a1a2e';
         context.fillRect(0, 0, dims.width, dims.height);
-    } else if (bg.type === 'image' && bg.image) {
-        const img = bg.image;
+    } else if (background.type === 'image' && background.image) {
+        const img = background.image;
         let sx = 0, sy = 0, sw = img.width, sh = img.height;
         let dx = 0, dy = 0, dw = dims.width, dh = dims.height;
 
-        if (bg.imageFit === 'cover') {
+        if (background.imageFit === 'cover') {
             const imgRatio = img.width / img.height;
             const canvasRatio = dims.width / dims.height;
 
@@ -9357,7 +9903,7 @@ function drawBackgroundToContext(context, dims, bg) {
                 sh = img.width / canvasRatio;
                 sy = (img.height - sh) / 2;
             }
-        } else if (bg.imageFit === 'contain') {
+        } else if (background.imageFit === 'contain') {
             const imgRatio = img.width / img.height;
             const canvasRatio = dims.width / dims.height;
 
@@ -9373,20 +9919,25 @@ function drawBackgroundToContext(context, dims, bg) {
             context.fillRect(0, 0, dims.width, dims.height);
         }
 
-        if (bg.imageBlur > 0) {
-            context.filter = `blur(${bg.imageBlur}px)`;
+        if (background.imageBlur > 0) {
+            context.filter = `blur(${background.imageBlur}px)`;
         }
 
         context.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
         context.filter = 'none';
 
-        if (bg.overlayOpacity > 0) {
-            context.fillStyle = bg.overlayColor;
-            context.globalAlpha = bg.overlayOpacity / 100;
+        if (background.overlayOpacity > 0) {
+            context.fillStyle = background.overlayColor;
+            context.globalAlpha = background.overlayOpacity / 100;
             context.fillRect(0, 0, dims.width, dims.height);
             context.globalAlpha = 1;
         }
+    } else {
+        context.fillStyle = background.solid || '#1a1a2e';
+        context.fillRect(0, 0, dims.width, dims.height);
     }
+    context.restore();
+    drawPhotoLayerToContext(context, dims, background.photo);
 }
 
 function drawNoiseToContext(context, dims, intensity) {
@@ -9692,6 +10243,51 @@ function drawElements(context, dims, layer) {
     drawElementsToContext(context, dims, elements, layer);
 }
 
+function drawPulseShapeToContext(context, width, height, element, dims) {
+    const cycles = Math.max(0.25, Number(element.cycles) || 2.5);
+    const phase = (Number(element.phase) || 0) * Math.PI * 2;
+    const taper = Math.max(0.25, Number(element.taper) || 1.5);
+    const canvasScale = Math.max(0.35, dims.width / 1320);
+    const lineWidth = Math.max(1, (Number(element.lineWidth) || 4) * canvasScale);
+    const glowBlur = Math.max(0, (Number(element.glowBlur) || 0) * canvasScale);
+    const glowOpacity = clampPhotoPercent(element.glowOpacity, 60) / 100;
+    const strokeColor = element.fill || '#B89CFF';
+
+    const tracePulse = () => {
+        context.beginPath();
+        const samples = Math.max(96, Math.round(width / 7));
+        for (let index = 0; index <= samples; index += 1) {
+            const progress = index / samples;
+            const envelope = Math.pow(Math.max(0, Math.sin(Math.PI * progress)), taper);
+            const carrier = Math.sin(progress * Math.PI * 2 * cycles + phase);
+            const harmonic = Math.sin(progress * Math.PI * 2 * cycles * 2.1 - phase * 0.4) * 0.18;
+            const x = -width / 2 + progress * width;
+            const y = (carrier * 0.82 + harmonic) * envelope * height / 2;
+            if (index === 0) context.moveTo(x, y);
+            else context.lineTo(x, y);
+        }
+        context.stroke();
+    };
+
+    context.save();
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    context.strokeStyle = strokeColor;
+    if (glowBlur > 0) {
+        context.globalAlpha *= glowOpacity;
+        context.lineWidth = lineWidth * 2.4;
+        context.shadowColor = strokeColor;
+        context.shadowBlur = glowBlur;
+        tracePulse();
+        context.globalAlpha /= Math.max(glowOpacity, 0.001);
+        context.shadowColor = 'transparent';
+        context.shadowBlur = 0;
+    }
+    context.lineWidth = lineWidth;
+    tracePulse();
+    context.restore();
+}
+
 // Draw elements to any context (for side previews and export)
 function drawElementsToContext(context, dims, elements, layer) {
     const filtered = elements.filter(el => el.layer === layer);
@@ -9710,14 +10306,18 @@ function drawElementsToContext(context, dims, elements, layer) {
 
         if (el.type === 'shape') {
             const elHeight = dims.height * ((el.height ?? el.width) / 100);
-            context.fillStyle = el.fill || '#ffffff';
-            context.beginPath();
-            if (el.shapeType === 'ellipse') {
-                context.ellipse(0, 0, elWidth / 2, elHeight / 2, 0, 0, Math.PI * 2);
+            if (el.shapeType === 'pulse') {
+                drawPulseShapeToContext(context, elWidth, elHeight, el, dims);
             } else {
-                context.roundRect(-elWidth / 2, -elHeight / 2, elWidth, elHeight, el.cornerRadius || 0);
+                context.fillStyle = el.fill || '#ffffff';
+                context.beginPath();
+                if (el.shapeType === 'ellipse') {
+                    context.ellipse(0, 0, elWidth / 2, elHeight / 2, 0, 0, Math.PI * 2);
+                } else {
+                    context.roundRect(-elWidth / 2, -elHeight / 2, elWidth, elHeight, el.cornerRadius || 0);
+                }
+                context.fill();
             }
-            context.fill();
         } else if (el.type === 'emoji' && el.emoji) {
             const emojiSize = elWidth * 0.85;
             context.font = `${emojiSize}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
@@ -9974,73 +10574,7 @@ function drawStar(context, cx, cy, size, color) {
 }
 
 function drawBackground() {
-    const dims = getCanvasDimensions();
-    const bg = getBackground();
-
-    if (bg.type === 'gradient') {
-        const angle = bg.gradient.angle * Math.PI / 180;
-        const x1 = dims.width / 2 - Math.cos(angle) * dims.width;
-        const y1 = dims.height / 2 - Math.sin(angle) * dims.height;
-        const x2 = dims.width / 2 + Math.cos(angle) * dims.width;
-        const y2 = dims.height / 2 + Math.sin(angle) * dims.height;
-
-        const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
-        bg.gradient.stops.forEach(stop => {
-            gradient.addColorStop(stop.position / 100, stop.color);
-        });
-
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, dims.width, dims.height);
-    } else if (bg.type === 'solid') {
-        ctx.fillStyle = bg.solid;
-        ctx.fillRect(0, 0, dims.width, dims.height);
-    } else if (bg.type === 'image' && bg.image) {
-        const img = bg.image;
-        let sx = 0, sy = 0, sw = img.width, sh = img.height;
-        let dx = 0, dy = 0, dw = dims.width, dh = dims.height;
-
-        if (bg.imageFit === 'cover') {
-            const imgRatio = img.width / img.height;
-            const canvasRatio = dims.width / dims.height;
-
-            if (imgRatio > canvasRatio) {
-                sw = img.height * canvasRatio;
-                sx = (img.width - sw) / 2;
-            } else {
-                sh = img.width / canvasRatio;
-                sy = (img.height - sh) / 2;
-            }
-        } else if (bg.imageFit === 'contain') {
-            const imgRatio = img.width / img.height;
-            const canvasRatio = dims.width / dims.height;
-
-            if (imgRatio > canvasRatio) {
-                dh = dims.width / imgRatio;
-                dy = (dims.height - dh) / 2;
-            } else {
-                dw = dims.height * imgRatio;
-                dx = (dims.width - dw) / 2;
-            }
-
-            ctx.fillStyle = '#000';
-            ctx.fillRect(0, 0, dims.width, dims.height);
-        }
-
-        if (bg.imageBlur > 0) {
-            ctx.filter = `blur(${bg.imageBlur}px)`;
-        }
-
-        ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
-        ctx.filter = 'none';
-
-        // Overlay
-        if (bg.overlayOpacity > 0) {
-            ctx.fillStyle = bg.overlayColor;
-            ctx.globalAlpha = bg.overlayOpacity / 100;
-            ctx.fillRect(0, 0, dims.width, dims.height);
-            ctx.globalAlpha = 1;
-        }
-    }
+    drawBackgroundToContext(ctx, getCanvasDimensions(), getBackground());
 }
 
 function drawScreenshot() {
@@ -10410,20 +10944,98 @@ function hexToRgba(hex, alpha) {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+function waitForRenderableImage(image, label, timeoutMs = 12000) {
+    if (!image) return Promise.resolve();
+    const imageWidth = image.naturalWidth || image.width || 0;
+    const imageHeight = image.naturalHeight || image.height || 0;
+    if (imageWidth > 0 && imageHeight > 0 && (image.complete === undefined || image.complete)) {
+        return Promise.resolve();
+    }
+    if (image.complete === true && (!imageWidth || !imageHeight)) {
+        return Promise.reject(new Error(`${label} could not be loaded.`));
+    }
+
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (error) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            image.removeEventListener?.('load', handleLoad);
+            image.removeEventListener?.('error', handleError);
+            if (error) reject(error);
+            else resolve();
+        };
+        const handleLoad = () => finish();
+        const handleError = () => finish(new Error(`${label} could not be loaded.`));
+        const timeout = setTimeout(() => finish(new Error(`${label} is still loading. Try exporting again.`)), timeoutMs);
+        image.addEventListener?.('load', handleLoad, { once: true });
+        image.addEventListener?.('error', handleError, { once: true });
+    });
+}
+
+function waitForPhoneModel(timeoutMs = 12000) {
+    if (typeof phoneModelLoaded === 'undefined' || phoneModelLoaded) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        const startedAt = Date.now();
+        const check = () => {
+            if (phoneModelLoaded) {
+                resolve();
+            } else if (Date.now() - startedAt >= timeoutMs) {
+                reject(new Error('The 3D phone is still loading. Try exporting again.'));
+            } else {
+                setTimeout(check, 50);
+            }
+        };
+        check();
+    });
+}
+
+async function prepareScreenshotForExport(index) {
+    const screenshot = state.screenshots[index];
+    if (!screenshot) return;
+    const background = screenshot.background || {};
+    const images = new Map();
+    const addImage = (image, label) => {
+        if (image && !images.has(image)) images.set(image, label);
+    };
+
+    if (background.type === 'image') addImage(background.image, 'Background image');
+    if (background.photo?.enabled) addImage(background.photo.image, 'Photo layer');
+    addImage(getScreenshotImage(screenshot), 'Device screenshot');
+    (screenshot.devices || []).forEach(device => {
+        addImage(getDeviceSourceImage(index, device, getScreenshotImage(screenshot)), 'Device screenshot');
+    });
+    await Promise.all([...images].map(([image, label]) => waitForRenderableImage(image, label)));
+
+    if (screenshot.screenshot?.use3D) {
+        if (typeof switchPhoneModel === 'function') {
+            switchPhoneModel(screenshot.screenshot.device3D || 'iphone');
+        }
+        await waitForPhoneModel();
+    }
+    updateCanvas();
+}
+
 async function exportCurrent() {
     if (state.screenshots.length === 0) {
         await showAppAlert('Please upload a screenshot first', 'info');
         return;
     }
 
-    // Ensure canvas is up-to-date (especially important for 3D mode)
-    updateCanvas();
-
-    const link = document.createElement('a');
-    link.download = `screenshot-${state.selectedIndex + 1}.png`;
-    link.href = canvas.toDataURL('image/png');
-    link.click();
-    setWorkspaceStatus('saved', 'Current screen exported', 1800);
+    try {
+        setWorkspaceStatus('saving', 'Preparing export…');
+        await prepareScreenshotForExport(state.selectedIndex);
+        const link = document.createElement('a');
+        link.download = `screenshot-${state.selectedIndex + 1}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        setWorkspaceStatus('saved', 'Current screen exported', 1800);
+    } catch (error) {
+        console.error('Export failed:', error);
+        setWorkspaceStatus('error', 'Export not ready');
+        await showAppAlert(error.message || 'The export could not be completed.', 'error');
+    }
 }
 
 async function exportAll() {
@@ -10500,38 +11112,37 @@ async function exportAllForLanguage(lang) {
         subheadline: s.text.currentSubheadlineLang
     }));
 
-    // Temporarily switch to the target language (images and text)
-    state.currentLanguage = lang;
-    state.screenshots.forEach(s => {
-        s.text.currentHeadlineLang = lang;
-        s.text.currentSubheadlineLang = lang;
-    });
+    try {
+        // Temporarily switch to the target language (images and text)
+        state.currentLanguage = lang;
+        state.screenshots.forEach(s => {
+            s.text.currentHeadlineLang = lang;
+            s.text.currentSubheadlineLang = lang;
+        });
 
-    for (let i = 0; i < state.screenshots.length; i++) {
-        state.selectedIndex = i;
+        for (let i = 0; i < state.screenshots.length; i++) {
+            state.selectedIndex = i;
+            await prepareScreenshotForExport(i);
+
+            // Update progress
+            const percent = Math.round(((i + 1) / total) * 90); // Reserve 10% for ZIP generation
+            showExportProgress('Exporting...', `Screenshot ${i + 1} of ${total}`, percent);
+
+            // Get canvas data as base64, strip the data URL prefix
+            const dataUrl = canvas.toDataURL('image/png');
+            const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
+
+            zip.file(`screenshot-${i + 1}.png`, base64Data, { base64: true });
+        }
+    } finally {
+        state.selectedIndex = originalIndex;
+        state.currentLanguage = originalLang;
+        state.screenshots.forEach((s, i) => {
+            s.text.currentHeadlineLang = originalTextLangs[i].headline;
+            s.text.currentSubheadlineLang = originalTextLangs[i].subheadline;
+        });
         updateCanvas();
-
-        // Update progress
-        const percent = Math.round(((i + 1) / total) * 90); // Reserve 10% for ZIP generation
-        showExportProgress('Exporting...', `Screenshot ${i + 1} of ${total}`, percent);
-
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        // Get canvas data as base64, strip the data URL prefix
-        const dataUrl = canvas.toDataURL('image/png');
-        const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
-
-        zip.file(`screenshot-${i + 1}.png`, base64Data, { base64: true });
     }
-
-    // Restore original settings
-    state.selectedIndex = originalIndex;
-    state.currentLanguage = originalLang;
-    state.screenshots.forEach((s, i) => {
-        s.text.currentHeadlineLang = originalTextLangs[i].headline;
-        s.text.currentSubheadlineLang = originalTextLangs[i].subheadline;
-    });
-    updateCanvas();
 
     // Generate ZIP
     showExportProgress('Generating ZIP...', '', 95);
@@ -10568,44 +11179,43 @@ async function exportAllLanguages() {
         subheadline: s.text.currentSubheadlineLang
     }));
 
-    for (let langIdx = 0; langIdx < state.projectLanguages.length; langIdx++) {
-        const lang = state.projectLanguages[langIdx];
-        const langName = languageNames[lang] || lang.toUpperCase();
+    try {
+        for (let langIdx = 0; langIdx < state.projectLanguages.length; langIdx++) {
+            const lang = state.projectLanguages[langIdx];
+            const langName = languageNames[lang] || lang.toUpperCase();
 
-        // Temporarily switch to this language (images and text)
-        state.currentLanguage = lang;
-        state.screenshots.forEach(s => {
-            s.text.currentHeadlineLang = lang;
-            s.text.currentSubheadlineLang = lang;
-        });
+            // Temporarily switch to this language (images and text)
+            state.currentLanguage = lang;
+            state.screenshots.forEach(s => {
+                s.text.currentHeadlineLang = lang;
+                s.text.currentSubheadlineLang = lang;
+            });
 
-        for (let i = 0; i < state.screenshots.length; i++) {
-            state.selectedIndex = i;
-            updateCanvas();
+            for (let i = 0; i < state.screenshots.length; i++) {
+                state.selectedIndex = i;
+                await prepareScreenshotForExport(i);
 
-            completedItems++;
-            const percent = Math.round((completedItems / totalItems) * 90); // Reserve 10% for ZIP
-            showExportProgress('Exporting...', `${langName}: Screenshot ${i + 1} of ${totalScreenshots}`, percent);
+                completedItems++;
+                const percent = Math.round((completedItems / totalItems) * 90); // Reserve 10% for ZIP
+                showExportProgress('Exporting...', `${langName}: Screenshot ${i + 1} of ${totalScreenshots}`, percent);
 
-            await new Promise(resolve => setTimeout(resolve, 100));
+                // Get canvas data as base64, strip the data URL prefix
+                const dataUrl = canvas.toDataURL('image/png');
+                const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
 
-            // Get canvas data as base64, strip the data URL prefix
-            const dataUrl = canvas.toDataURL('image/png');
-            const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
-
-            // Use language code as folder name
-            zip.file(`${lang}/screenshot-${i + 1}.png`, base64Data, { base64: true });
+                // Use language code as folder name
+                zip.file(`${lang}/screenshot-${i + 1}.png`, base64Data, { base64: true });
+            }
         }
+    } finally {
+        state.selectedIndex = originalIndex;
+        state.currentLanguage = originalLang;
+        state.screenshots.forEach((s, i) => {
+            s.text.currentHeadlineLang = originalTextLangs[i].headline;
+            s.text.currentSubheadlineLang = originalTextLangs[i].subheadline;
+        });
+        updateCanvas();
     }
-
-    // Restore original settings
-    state.selectedIndex = originalIndex;
-    state.currentLanguage = originalLang;
-    state.screenshots.forEach((s, i) => {
-        s.text.currentHeadlineLang = originalTextLangs[i].headline;
-        s.text.currentSubheadlineLang = originalTextLangs[i].subheadline;
-    });
-    updateCanvas();
 
     // Generate ZIP
     showExportProgress('Generating ZIP...', '', 95);
