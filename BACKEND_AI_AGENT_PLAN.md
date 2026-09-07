@@ -1,6 +1,6 @@
 # AppScreen: SaaS conversion and AI campaign plan
 
-Status: proposed, not implemented. Prepared September 4, 2026 from the local codebase and running editor. Updated to reflect the user's explicit objective: convert AppScreen into a commercial SaaS. Hosting accounts, paid services, and model calls have not been provisioned or executed.
+Historical planning baseline, prepared September 4, 2026 from the local codebase and running editor. Implementation has since progressed; use [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for dated test evidence and [the launch gates](deploy/LAUNCH_GATES.md) for remaining acceptance decisions. This plan defines the user's objective—convert AppScreen into a commercial SaaS—but is not evidence of provider provisioning, live model results or production readiness. Code findings and line references below describe the original planning snapshot.
 
 ## Recommendation
 

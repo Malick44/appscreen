@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="1434" viewBox="0 0 660 1434">
+  <rect width="660" height="1434" fill="#eeecf6"/>
+  <rect x="32" y="80" width="596" height="110" rx="25" fill="#393452"/>
+  <text x="62" y="147" font-family="sans-serif" font-size="36" fill="white">AppScreen QA fixture</text>
+  <text x="40" y="245" font-family="sans-serif" font-size="25" fill="#302b48">TEST ONLY — not a real app</text>
+  <rect x="32" y="300" width="596" height="440" rx="30" fill="#a49aca"/>
+  <circle cx="330" cy="490" r="100" fill="#cfc8e4"/>
+  <path d="m280 490 35 35 74-83" fill="none" stroke="#393452" stroke-width="14"/>
+  <rect x="32" y="785" width="596" height="140" rx="25" fill="white"/>
+  <rect x="32" y="955" width="596" height="140" rx="25" fill="white"/>
+  <rect x="32" y="1125" width="596" height="140" rx="25" fill="white"/>
+  <text x="64" y="870" font-family="sans-serif" font-size="30" fill="#393452">Check screenshot mapping</text>
+  <text x="64" y="1040" font-family="sans-serif" font-size="30" fill="#393452">Check saved device positions</text>
+  <text x="64" y="1210" font-family="sans-serif" font-size="30" fill="#393452">Check opaque exports</text>
+</svg>

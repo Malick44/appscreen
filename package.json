@@ -15,12 +15,42 @@
   },
   "scripts": {
     "serve": "python3 -m http.server 8000",
+    "dev:saas": "tsx watch server/main.ts",
+    "start": "tsx server/main.ts",
+    "worker": "tsx server/worker-main.ts",
+    "db:migrate": "tsx server/migrate.ts",
+    "typecheck": "tsc --noEmit",
+    "test:saas": "tsx --test server/tests/*.test.ts",
+    "test:unit": "node --test core/*.test.mjs server/agent/*.test.mjs server/mcp/*.test.mjs saas/tests/*.test.mjs deploy/live-ai-budget-ledger.test.mjs",
+    "test": "npm run typecheck && npm run test:unit && npm run test:saas",
+    "test:core": "node --test core/*.test.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
-    "playwright": "^1.59.1"
+    "@types/node": "^26.4.1",
+    "@types/pg": "^8.23.1",
+    "playwright": "^1.59.1",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@fastify/multipart": "^10.1.1",
+    "@fastify/rate-limit": "^11.2.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@supabase/supabase-js": "^2.115.0",
+    "dotenv": "^17.4.2",
+    "fastify": "^5.12.3",
+    "jose": "^6.2.11",
+    "jszip": "^3.10.1",
+    "openai": "^7.10.0",
+    "pg": "^8.23.0",
+    "pg-boss": "^12.30.0",
+    "sharp": "^0.35.4",
+    "stripe": "^22.6.1",
+    "svix": "2.3.0",
+    "tsx": "^4.23.13",
+    "zod": "^4.5.4"
   }
 }

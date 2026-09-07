@@ -219,7 +219,7 @@ function showTemplateToast(message, allowUndo = false) {
     toast.className = 'template-toast';
     toast.setAttribute('role', 'status');
     toast.setAttribute('aria-live', 'polite');
-    toast.innerHTML = `<span>${message}</span>${allowUndo ? '<button type="button">Undo layout</button>' : ''}`;
+    toast.innerHTML = `<span>${escapeInspectorText(message)}</span>${allowUndo ? '<button type="button">Undo layout</button>' : ''}`;
     document.body.appendChild(toast);
     requestAnimationFrame(() => toast.classList.add('visible'));
     toast.querySelector('button')?.addEventListener('click', undoLastTemplate);
@@ -371,6 +371,21 @@ function ensureDeviceMetadata() {
     });
 
     linkedPlacements.forEach((contexts, placementLinkId) => {
+        // A cloud sequence can end with a canonical outgoing device before its next
+        // screen exists. Keep that singleton; it is not a broken legacy seam pair.
+        const singleton = contexts.length === 1 ? contexts[0] : null;
+        const cloudDocument = state.cloudDocument?.id === state.id ? state.cloudDocument : null;
+        const canonicalGroup = singleton && cloudDocument?.deviceGroups?.find(group => group.id === placementLinkId);
+        if (singleton && singleton.device.groupId === placementLinkId
+            && singleton.device.seamLocked === true && canonicalGroup?.seamLocked === true
+            && isCurrentScreenshotDevice(singleton.screenshot, singleton.device)) {
+            const canonicalPlacements = cloudDocument.scenes.flatMap(scene => scene.devices
+                .filter(device => device.groupId === placementLinkId)
+                .map(device => ({ sceneId: scene.id, deviceId: device.id })));
+            if (canonicalPlacements.length === 1
+                && canonicalPlacements[0].sceneId === singleton.screenshot.id
+                && canonicalPlacements[0].deviceId === singleton.device.id) return;
+        }
         const uniqueIndices = [...new Set(contexts.map(context => context.screenIndex))];
         let remainsAdjacent = contexts.length === 2
             && uniqueIndices.length === 2
@@ -378,6 +393,7 @@ function ensureDeviceMetadata() {
         if (remainsAdjacent) {
             const [outgoing, incoming] = [...contexts].sort((a, b) => a.screenIndex - b.screenIndex);
             remainsAdjacent = isCurrentScreenshotDevice(outgoing.screenshot, outgoing.device)
+                && outgoing.device.continueToNext !== false
                 && getDeviceSourceIndex(incoming.screenIndex, incoming.device) === outgoing.screenIndex;
         }
         if (remainsAdjacent) return;
@@ -392,7 +408,9 @@ function ensureDeviceMetadata() {
         const current = state.screenshots[screenIndex];
         if (!previous || !current) continue;
         const previousOutgoing = (previous.devices || []).filter(device =>
-            isCurrentScreenshotDevice(previous, device) && device.positionMode === 'canvas');
+            isCurrentScreenshotDevice(previous, device)
+            && device.continueToNext !== false
+            && device.positionMode === 'canvas');
         (current.devices || []).forEach(incoming => {
             if (incoming.sourceScreenshotId !== previous.id || incoming.positionMode !== 'canvas') return;
             const matches = previousOutgoing.filter(outgoing => devicePlacementsFormSeam(outgoing, incoming));
@@ -500,6 +518,16 @@ function detachExternalDeviceReferences(targetIndices) {
     });
 }
 
+function getExternalDeviceReferenceIndices(targetIndices) {
+    const targetIndexSet = new Set(targetIndices);
+    return state.screenshots.flatMap((screenshot, screenshotIndex) => {
+        if (targetIndexSet.has(screenshotIndex)) return [];
+        const referencesTarget = (screenshot.devices || []).some(device =>
+            targetIndexSet.has(getDeviceSourceIndex(screenshotIndex, device)));
+        return referencesTarget ? [screenshotIndex] : [];
+    });
+}
+
 function applyTemplate(templateId, mode = 'all') {
     const template = typeof APP_TEMPLATES !== 'undefined' && APP_TEMPLATES.find(item => item.id === templateId);
     if (!getCurrentScreenshot() || !template) return false;
@@ -513,16 +541,18 @@ function applyTemplate(templateId, mode = 'all') {
         return false;
     }
 
-    const snapshotIndices = template.type === 'sequence'
-        ? targetIndices
-        : [...new Set([
-            ...targetIndices,
-            ...getLinkedDeviceScreens(state.screenshots[startIndex])
-                .map(screenshot => state.screenshots.indexOf(screenshot))
-                .filter(index => index >= 0)
-        ])];
+    const linkedTargetIndices = targetIndices.flatMap(index =>
+        getLinkedDeviceScreens(state.screenshots[index])
+            .map(screenshot => state.screenshots.indexOf(screenshot))
+            .filter(linkedIndex => linkedIndex >= 0)
+    );
+    const snapshotIndices = [...new Set([
+        ...targetIndices,
+        ...linkedTargetIndices,
+        ...getExternalDeviceReferenceIndices(targetIndices)
+    ])];
     captureTemplateSnapshot(snapshotIndices);
-    if (template.type !== 'sequence') detachExternalDeviceReferences(targetIndices);
+    detachExternalDeviceReferences(targetIndices);
     scenes.forEach((scene, offset) => {
         applyTemplateScene(state.screenshots[startIndex + offset], scene, startIndex + offset, mode, template.type === 'sequence');
     });
@@ -553,6 +583,11 @@ function getSequenceOutgoingDevices(screenshot, screenshotIndex) {
     const canCrossSeam = device => device.positionMode === 'canvas'
         && Number.isFinite(device.centerX)
         && Number.isFinite(device.centerY);
+    const hasExplicitTerminalDevice = devices.some(device => isCurrentScreenshotDevice(screenshot, device)
+        && device.hidden !== true
+        && device.continueToNext === false);
+    if (hasExplicitTerminalDevice) return [];
+
     const explicitOutgoing = devices.filter(device => isCurrentScreenshotDevice(screenshot, device)
         && device.hidden !== true
         && device.continueToNext === true
@@ -832,7 +867,10 @@ function drawTemplateDevicePlaceholder(context, dims, device, detailed = false, 
 }
 
 function renderTemplateThumbnail(template, element) {
-    const scenes = getTemplateScenes(template);
+    const templateScenes = getTemplateScenes(template);
+    const scenes = templateScenes.length > 3
+        ? [templateScenes[0], templateScenes[Math.floor(templateScenes.length / 2)], templateScenes.at(-1)]
+        : templateScenes;
     const isSequence = template.type === 'sequence';
     const panelWidth = 270;
     const gap = isSequence ? 10 : 0;
@@ -873,8 +911,11 @@ function openTemplateGallery() {
     templateGalleryReturnFocus = document.activeElement;
     const overlay = document.createElement('div');
     overlay.id = 'template-gallery-overlay'; overlay.className = 'modal-overlay visible';
-    const sequenceTemplates = APP_TEMPLATES.filter(template => template.type === 'sequence');
-    const singleTemplates = APP_TEMPLATES.filter(template => template.type !== 'sequence');
+    const supportedScreenCounts = [1, 3, 6];
+    const templatesByScreenCount = new Map(supportedScreenCounts.map(screenCount => [
+        screenCount,
+        APP_TEMPLATES.filter(template => getTemplateScenes(template).length === screenCount)
+    ]));
     const renderCard = template => {
         const isSequence = template.type === 'sequence';
         const screenCount = getTemplateScenes(template).length;
@@ -886,29 +927,31 @@ function openTemplateGallery() {
                 ? (template.description || 'Connected device composition')
                 : (template.description || template.category);
         const singleScreenAction = template.background?.photo ? 'Apply + add photo' : 'Apply template';
-        return `<button type="button" class="template-card${isSequence ? ' template-card-sequence' : ''}" data-template="${template.id}"${isUnavailable ? ' aria-disabled="true"' : ''}>
+        return `<button type="button" class="template-card${isSequence ? ' template-card-sequence' : ''}" data-template="${template.id}" data-screen-count="${screenCount}"${isUnavailable ? ' aria-disabled="true"' : ''}>
             <span class="template-preview${isSequence ? ' is-sequence' : ''}" aria-hidden="true" style="--c1:${template.palette[0]};--c2:${template.palette[1]};--ink:${template.palette[2]}"><i></i><b></b><em></em></span>
-            <span class="template-card-heading"><strong>${template.name}</strong>${isSequence ? `<span class="template-badge">${screenCount}+ screens</span>` : ''}</span>
-            <small>${helper}</small><span class="template-card-action">${isSequence ? `Start with ${screenCount} screens` : singleScreenAction}</span>
+            <span class="template-card-heading"><strong>${template.name}</strong><span class="template-badge">${screenCount} ${screenCount === 1 ? 'screen' : 'screens'}</span></span>
+            <small>${helper}</small><span class="template-card-action">${isSequence ? `Apply to ${screenCount} screens` : singleScreenAction}</span>
         </button>`;
     };
-    const sequenceCards = sequenceTemplates.map(renderCard).join('');
-    const singleCards = singleTemplates.map(renderCard).join('');
+    const sectionDetails = {
+        1: ['One-screen looks', 'A complete art direction for one focused screenshot.'],
+        3: ['Three-screen stories', 'A concise connected story with a clean ending on screen three.'],
+        6: ['Six-screen campaigns', 'A complete feature narrative that resolves on screen six.']
+    };
+    const templateSections = supportedScreenCounts.map(screenCount => {
+        const templates = templatesByScreenCount.get(screenCount) || [];
+        const [title, description] = sectionDetails[screenCount];
+        return `<section class="template-section" aria-labelledby="template-${screenCount}-screen-heading">
+            <div class="template-section-header"><div><h3 id="template-${screenCount}-screen-heading">${title}</h3><p>${description}</p></div><span class="template-section-count">${templates.length}</span></div>
+            <div class="template-grid ${screenCount === 1 ? 'template-grid-singles' : 'template-grid-sequences'}">${templates.map(renderCard).join('')}</div>
+        </section>`;
+    }).join('');
     overlay.innerHTML = `<div class="modal template-gallery" role="dialog" aria-modal="true" aria-labelledby="template-gallery-title" aria-describedby="template-gallery-description">
         <div class="template-gallery-chrome">
-            <div class="template-gallery-header"><div><h2 id="template-gallery-title">Choose a template</h2><p id="template-gallery-description">Keep your screenshots and copy while applying a complete art direction.</p></div><button type="button" class="modal-close" data-close aria-label="Close template gallery">&times;</button></div>
+            <div class="template-gallery-header"><div><h2 id="template-gallery-title">Choose a template</h2><p id="template-gallery-description">Choose an exact one-, three-, or six-screen art direction while keeping your screenshots and copy.</p></div><button type="button" class="modal-close" data-close aria-label="Close template gallery">&times;</button></div>
             <div class="template-mode" role="group" aria-label="Application mode"><label><input type="radio" name="template-mode" value="all" checked> Colors + layout</label><label><input type="radio" name="template-mode" value="layout"> Layout only</label><label><input type="radio" name="template-mode" value="replace"> Replace everything</label></div>
         </div>
-        <div class="template-gallery-scroll">
-            <section class="template-section" aria-labelledby="sequence-template-heading">
-                <div class="template-section-header"><div><h3 id="sequence-template-heading">Sequence starters</h3><p>Start with three connected screens, then continue the flow as you add more.</p></div><span class="template-section-count">${sequenceTemplates.length}</span></div>
-                <div class="template-grid template-grid-sequences">${sequenceCards}</div>
-            </section>
-            <section class="template-section" aria-labelledby="single-template-heading">
-                <div class="template-section-header"><div><h3 id="single-template-heading">Single-screen looks</h3><p>Complete art directions for one screenshot.</p></div><span class="template-section-count">${singleTemplates.length}</span></div>
-                <div class="template-grid template-grid-singles">${singleCards}</div>
-            </section>
-        </div>
+        <div class="template-gallery-scroll">${templateSections}</div>
     </div>`;
     document.body.appendChild(overlay);
     const templateCards = [...overlay.querySelectorAll('[data-template]')];
@@ -1005,6 +1048,10 @@ function getScreenshotSettings() {
 }
 
 function getDeviceSourceImage(renderIndex, device, fallbackImage = null) {
+    if (device?.sourceId && !device.sourceScreenshotId) {
+        const cloudImage = window.AppScreenCloudBridge?.getSourceImage(device.sourceId, state.currentLanguage);
+        if (cloudImage) return cloudImage;
+    }
     if (device?.sourceScreenshotId) {
         const sourceScreenshot = state.screenshots.find(screenshot => screenshot.id === device.sourceScreenshotId) || null;
         return sourceScreenshot ? getScreenshotImage(sourceScreenshot) : null;
@@ -2736,6 +2783,14 @@ async function renderFontList(pickerId, ids) {
 }
 
 // Update font picker preview from state
+function isCloudDocumentContext() {
+    // Cloud reload briefly restores the browser cache before the canonical
+    // document arrives. That cache must not trigger metadata-driven providers.
+    return Boolean(state.cloudDocument)
+        || (window.location?.pathname === '/editor'
+            && new URLSearchParams(window.location.search).has('project'));
+}
+
 function updateFontPickerPreview() {
     updateSingleFontPickerPreview('headline-font', 'font-picker-preview', 'headlineFont');
     updateSingleFontPickerPreview('subheadline-font', 'subheadline-font-picker-preview', 'subheadlineFont');
@@ -2748,7 +2803,7 @@ function updateSingleFontPickerPreview(hiddenId, previewId, stateKey) {
 
     const text = getTextSettings();
     const fontValue = text[stateKey];
-    if (!fontValue) return;
+    if (typeof fontValue !== 'string' || !fontValue) return;
 
     hiddenInput.value = fontValue;
 
@@ -2763,7 +2818,7 @@ function updateSingleFontPickerPreview(hiddenId, previewId, stateKey) {
         if (match) {
             fontName = match[1];
             // Load the font if it's a Google Font
-            loadGoogleFont(fontName);
+            if (!isCloudDocumentContext()) loadGoogleFont(fontName);
         }
     }
 
@@ -2777,7 +2832,7 @@ function updateElementFontPickerPreview(el) {
     if (!preview || !hiddenInput || !el) return;
 
     const fontValue = el.font;
-    if (!fontValue) return;
+    if (typeof fontValue !== 'string' || !fontValue) return;
 
     hiddenInput.value = fontValue;
 
@@ -2789,7 +2844,7 @@ function updateElementFontPickerPreview(el) {
         const match = fontValue.match(/'([^']+)'/);
         if (match) {
             fontName = match[1];
-            loadGoogleFont(fontName);
+            if (!isCloudDocumentContext()) loadGoogleFont(fontName);
         }
     }
 
@@ -3175,7 +3230,7 @@ function updateProjectSelector() {
         const screenshotCount = project.id === currentProjectId ? state.screenshots.length : (project.screenshotCount || 0);
 
         option.innerHTML = `
-            <span class="project-option-name">${project.name}</span>
+            <span class="project-option-name">${escapeInspectorText(project.name)}</span>
             <span class="project-option-meta">${screenshotCount} screenshot${screenshotCount !== 1 ? 's' : ''}</span>
         `;
 
@@ -3204,6 +3259,8 @@ async function init() {
         // Continue with defaults
         syncUIWithState();
         updateCanvas();
+    } finally {
+        window.AppScreenEditorRuntime?.resolveReady();
     }
 }
 
@@ -3359,6 +3416,7 @@ function setWorkspaceStatus(kind, message, restoreDelay = 0) {
 
 // Save state to IndexedDB for current project
 function saveState() {
+    window.AppScreenCloudBridge?.notifyChange();
     if (!db) return;
 
     const currentSaveVersion = ++saveStatusVersion;
@@ -3469,11 +3527,11 @@ function reconstructElementImages(elements) {
     if (!elements || !Array.isArray(elements)) return [];
     return elements.map(el => {
         const restored = { ...el };
-        if (el.type === 'graphic' && el.src) {
+        if ((el.type === 'graphic' || (el.type === 'icon' && el.assetId)) && typeof el.src === 'string' && el.src) {
             const img = new Image();
             img.src = el.src;
             restored.image = img;
-        } else if (el.type === 'icon' && el.iconName) {
+        } else if (el.type === 'icon' && el.iconName && !isCloudDocumentContext()) {
             // Async fetch; image will be null initially, then updateCanvas() when ready
             getLucideImage(el.iconName, el.iconColor || '#ffffff', el.iconStrokeWidth || 2)
                 .then(img => {
@@ -4371,11 +4429,11 @@ function updateElementsList() {
 
         let thumbContent;
         if (el.type === 'graphic' && el.image) {
-            thumbContent = `<img src="${el.image.src}" alt="${el.name}">`;
+            thumbContent = `<img src="${escapeInspectorText(el.image.src)}" alt="${escapeInspectorText(el.name)}">`;
         } else if (el.type === 'emoji') {
-            thumbContent = `<span class="emoji-thumb">${el.emoji}</span>`;
+            thumbContent = `<span class="emoji-thumb">${escapeInspectorText(el.emoji)}</span>`;
         } else if (el.type === 'icon' && el.image) {
-            thumbContent = `<img src="${el.image.src}" alt="${el.name}" style="padding: 4px; filter: var(--icon-thumb-filter, none);">`;
+            thumbContent = `<img src="${escapeInspectorText(el.image.src)}" alt="${escapeInspectorText(el.name)}" style="padding: 4px; filter: var(--icon-thumb-filter, none);">`;
         } else {
             thumbContent = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/>
@@ -4385,8 +4443,8 @@ function updateElementsList() {
         item.innerHTML = `
             <div class="element-item-thumb">${thumbContent}</div>
             <div class="element-item-info">
-                <div class="element-item-name">${el.type === 'text' ? (getElementText(el) || 'Text') : el.type === 'emoji' ? `${el.emoji} ${el.name}` : el.name}</div>
-                <div class="element-item-layer">${layerLabels[el.layer] || el.layer}</div>
+                <div class="element-item-name">${escapeInspectorText(el.type === 'text' ? (getElementText(el) || 'Text') : el.type === 'emoji' ? `${el.emoji} ${el.name}` : el.name)}</div>
+                <div class="element-item-layer">${escapeInspectorText(layerLabels[el.layer] || el.layer)}</div>
             </div>
             <div class="element-item-actions">
                 <button class="element-item-btn" data-action="move-up" title="Move up">
@@ -4848,7 +4906,7 @@ function setupElementCanvasDrag() {
                 } else if (el.type === 'shape') {
                     elHeight = dims.height * ((el.height ?? el.width) / 100);
                 } else {
-                    elHeight = el.fontSize * 1.5;
+                    elHeight = (el.fontSize || 24) * 1.5;
                 }
 
                 // Simple bounding box hit test (ignoring rotation for simplicity)
@@ -6997,7 +7055,7 @@ function updateLanguageMenu() {
     state.projectLanguages.forEach(lang => {
         const btn = document.createElement('button');
         btn.className = 'language-menu-item' + (lang === state.currentLanguage ? ' active' : '');
-        btn.innerHTML = `<span class="flag">${languageFlags[lang] || '🏳️'}</span> ${languageNames[lang] || lang.toUpperCase()}`;
+        btn.innerHTML = `<span class="flag">${escapeInspectorText(languageFlags[lang] || '🏳️')}</span> ${escapeInspectorText(languageNames[lang] || lang.toUpperCase())}`;
         btn.onclick = () => {
             switchGlobalLanguage(lang);
             document.getElementById('language-menu').classList.remove('visible');
@@ -7066,8 +7124,8 @@ function updateLanguagesList() {
         const isOnly = state.projectLanguages.length === 1;
 
         item.innerHTML = `
-            <span class="flag">${flag}</span>
-            <span class="name">${name}</span>
+            <span class="flag">${escapeInspectorText(flag)}</span>
+            <span class="name">${escapeInspectorText(name)}</span>
             ${isCurrent ? '<span class="current-badge">Current</span>' : ''}
             <button class="remove-btn" ${isOnly ? 'disabled' : ''} title="${isOnly ? 'Cannot remove the only language' : 'Remove language'}">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -7322,7 +7380,7 @@ function openAiTextModal(target) {
 
     const languageSelect = document.getElementById('ai-text-language');
     languageSelect.innerHTML = state.projectLanguages.map(lang =>
-        `<option value="${lang}"${lang === state.currentLanguage ? ' selected' : ''}>${languageFlags[lang] || ''} ${languageNames[lang] || lang}</option>`
+        `<option value="${escapeInspectorText(lang)}"${lang === state.currentLanguage ? ' selected' : ''}>${escapeInspectorText(languageFlags[lang] || '')} ${escapeInspectorText(languageNames[lang] || lang)}</option>`
     ).join('');
 
     document.getElementById('ai-text-modal').classList.add('visible');
@@ -7506,10 +7564,10 @@ function openTranslateModal(target) {
         item.dataset.lang = lang;
         item.innerHTML = `
             <div class="translate-target-header">
-                <span class="flag">${languageFlags[lang]}</span>
-                <span>${languageNames[lang] || lang}</span>
+                <span class="flag">${escapeInspectorText(languageFlags[lang])}</span>
+                <span>${escapeInspectorText(languageNames[lang] || lang)}</span>
             </div>
-            <textarea placeholder="Enter ${languageNames[lang] || lang} translation...">${texts[lang] || ''}</textarea>
+            <textarea placeholder="Enter ${escapeInspectorText(languageNames[lang] || lang)} translation...">${escapeInspectorText(texts[lang] || '')}</textarea>
         `;
         targetsContainer.appendChild(item);
     });
@@ -7735,7 +7793,7 @@ function showAppAlert(message, type = 'info') {
                         ${iconPath}
                     </svg>
                 </div>
-                <p class="modal-message" style="margin: 16px 0;">${message}</p>
+                <p class="modal-message" style="margin: 16px 0;">${escapeInspectorText(message)}</p>
                 <div class="modal-buttons">
                     <button class="modal-btn modal-btn-confirm" style="background: var(--accent);">OK</button>
                 </div>
@@ -7767,10 +7825,10 @@ function showAppConfirm(message, confirmText = 'Confirm', cancelText = 'Cancel')
                         <path d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                     </svg>
                 </div>
-                <p class="modal-message" style="margin: 16px 0; white-space: pre-line;">${message}</p>
+                <p class="modal-message" style="margin: 16px 0; white-space: pre-line;">${escapeInspectorText(message)}</p>
                 <div class="modal-buttons">
-                    <button class="modal-btn modal-btn-cancel">${cancelText}</button>
-                    <button class="modal-btn modal-btn-confirm" style="background: var(--accent);">${confirmText}</button>
+                    <button class="modal-btn modal-btn-cancel">${escapeInspectorText(cancelText)}</button>
+                    <button class="modal-btn modal-btn-confirm" style="background: var(--accent);">${escapeInspectorText(confirmText)}</button>
                 </div>
             </div>
         `;
@@ -7810,7 +7868,7 @@ function showTranslateConfirmDialog(providerName) {
             const flag = languageFlags[lang] || '🏳️';
             const name = languageNames[lang] || lang.toUpperCase();
             const selected = lang === defaultLang ? 'selected' : '';
-            return `<option value="${lang}" ${selected}>${flag} ${name}</option>`;
+            return `<option value="${escapeInspectorText(lang)}" ${selected}>${escapeInspectorText(flag)} ${escapeInspectorText(name)}</option>`;
         }).join('');
 
         // Count texts for each language
@@ -8729,6 +8787,19 @@ function createNewScreenshot(img, src, name, lang, deviceType) {
 
 let draggedScreenshotIndex = null;
 
+function getScreenshotDeviceLabel(screenshot, image) {
+    if (screenshot?.deviceType === 'iPhone' || screenshot?.deviceType === 'iPad') {
+        return screenshot.deviceType;
+    }
+    // Cloud imports have source images, but no legacy device-type hint. Show
+    // their actual source dimensions without guessing a device from its shape.
+    const width = image?.naturalWidth ?? image?.width;
+    const height = image?.naturalHeight ?? image?.height;
+    return Number.isSafeInteger(width) && width > 0 && Number.isSafeInteger(height) && height > 0
+        ? `${width} × ${height} px`
+        : 'Screenshot';
+}
+
 function updateScreenshotList() {
     screenshotList.innerHTML = '';
     const isEmpty = state.screenshots.length === 0;
@@ -8876,7 +8947,7 @@ function updateScreenshotList() {
                     <rect x="3" y="3" width="18" height="18" rx="2"/>
                 </svg>
               </div>`
-            : `<img class="screenshot-thumb" src="${thumbSrc}" alt="${screenshot.name}">`;
+            : `<img class="screenshot-thumb" src="${escapeInspectorText(thumbSrc)}" alt="${escapeInspectorText(screenshot.name)}">`;
 
         item.innerHTML = `
             <div class="drag-handle">
@@ -8888,8 +8959,8 @@ function updateScreenshotList() {
             </div>
             ${thumbHtml}
             <div class="screenshot-info">
-                <div class="screenshot-name">${screenshot.name}</div>
-                <div class="screenshot-device">${isTransferTarget ? `Click source to copy ${state.transferType === 'device' ? 'device' : 'style'}` : screenshot.deviceType}${langFlagsHtml}${sequenceLinkHtml}</div>
+                <div class="screenshot-name">${escapeInspectorText(screenshot.name)}</div>
+                <div class="screenshot-device">${isTransferTarget ? `Click source to copy ${state.transferType === 'device' ? 'device' : 'style'}` : `<span class="screenshot-source-label">${getScreenshotDeviceLabel(screenshot, thumbImg)}</span>`}${langFlagsHtml}${sequenceLinkHtml}</div>
             </div>
             ${buttonsHtml}
         `;
@@ -9352,8 +9423,8 @@ function updateGradientStopsUI() {
         const div = document.createElement('div');
         div.className = 'gradient-stop';
         div.innerHTML = `
-            <input type="color" value="${stop.color}" data-stop="${index}">
-            <input type="number" value="${stop.position}" min="0" max="100" data-stop="${index}">
+            <input type="color" value="${escapeInspectorText(stop.color)}" data-stop="${index}">
+            <input type="number" value="${escapeInspectorText(stop.position)}" min="0" max="100" data-stop="${index}">
             <span>%</span>
             ${index > 1 ? `<button class="screenshot-delete" data-stop="${index}">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -9412,8 +9483,8 @@ function updateTextGradientStopsUI(prefix) {
         const div = document.createElement('div');
         div.className = 'gradient-stop';
         div.innerHTML = `
-            <input type="color" value="${stop.color}" data-stop="${index}">
-            <input type="number" value="${stop.position}" min="0" max="100" data-stop="${index}">
+            <input type="color" value="${escapeInspectorText(stop.color)}" data-stop="${index}">
+            <input type="number" value="${escapeInspectorText(stop.position)}" min="0" max="100" data-stop="${index}">
             <span>%</span>
             ${index > 1 ? `<button class="screenshot-delete" data-stop="${index}">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -9473,6 +9544,22 @@ function updateCanvas(options = {}) {
     const scale = Math.min(maxPreviewWidth / dims.width, maxPreviewHeight / dims.height);
     canvas.style.width = (dims.width * scale) + 'px';
     canvas.style.height = (dims.height * scale) + 'px';
+
+    const sharedScene = state.screenshots[state.selectedIndex];
+    if (state.cloudDocument && window.AppScreenSharedRender && sharedScene && !sharedScene.screenshot?.use3D && !sharedScene.background?.photo?.enabled && getScreenshotImage(sharedScene)) {
+        try {
+            window.AppScreenSharedRender.renderLegacyScene(ctx, dims, sharedScene, {
+                locale: state.currentLanguage,
+                seed: state.cloudDocument?.seed || 1729,
+                getImage: device => getDeviceSourceImage(state.selectedIndex, device, getScreenshotImage(sharedScene))
+            });
+            updateSidePreviews();
+            updateDeviceSelectionOutline();
+            return;
+        } catch (error) {
+            console.warn('Shared preview is awaiting an image:', error.message);
+        }
+    }
 
     // Draw background
     drawBackground();
@@ -9733,6 +9820,19 @@ function renderScreenshotToCanvas(index, targetCanvas, targetCtx, dims, previewS
 
     // Clear canvas explicitly
     targetCtx.clearRect(0, 0, dims.width, dims.height);
+
+    if (state.cloudDocument && window.AppScreenSharedRender && !screenshot.screenshot?.use3D && !screenshot.background?.photo?.enabled && img) {
+        try {
+            window.AppScreenSharedRender.renderLegacyScene(targetCtx, dims, screenshot, {
+                locale: state.currentLanguage,
+                seed: state.cloudDocument?.seed || 1729,
+                getImage: device => getDeviceSourceImage(index, device, img)
+            });
+            return;
+        } catch (error) {
+            console.warn('Shared side preview is awaiting an image:', error.message);
+        }
+    }
 
     // Draw background for this screenshot
     const bg = screenshot.background;
@@ -11468,6 +11568,34 @@ function wireIconClicks(grid) {
         };
     });
 }
+
+// Narrow integration surface: the cloud shell never reaches into editor globals.
+let resolveEditorReady;
+window.AppScreenEditorRuntime = {
+    ready: new Promise(resolve => { resolveEditorReady = resolve; }),
+    resolveReady() { resolveEditorReady?.(); },
+    snapshot() {
+        const dims = getCanvasDimensions();
+        return { ...state, id: currentProjectId, name: projects.find(p => p.id === currentProjectId)?.name || 'Untitled campaign',
+            customWidth: dims.width, customHeight: dims.height };
+    },
+    setCloudMetadata(document) { state.cloudDocument = document; },
+    replace(legacy, { name, preserveSelection = false } = {}) {
+        const selectedId = preserveSelection ? state.screenshots[state.selectedIndex]?.id : null;
+        Object.assign(state, legacy);
+        if (!Object.hasOwn(deviceDimensions, state.outputDevice)) state.outputDevice = 'custom';
+        currentProjectId = legacy.id;
+        let project = projects.find(item => item.id === legacy.id);
+        if (!project) { project = { id: legacy.id, name: name || 'Cloud project', createdAt: Date.now(), screenshotCount: legacy.screenshots.length }; projects.push(project); }
+        else { project.name = name || project.name; project.screenshotCount = legacy.screenshots.length; }
+        const selectedIndex = selectedId ? state.screenshots.findIndex(item => item.id === selectedId) : 0;
+        state.selectedIndex = Math.max(0, selectedIndex);
+        selectedDeviceId = selectedElementId = selectedPopoutId = null;
+        templateUndoSnapshot = null;
+        saveProjectsMeta(); updateProjectSelector(); syncUIWithState();
+        updateScreenshotList(); updateElementsList(); updateCanvas();
+    }
+};
 
 // Initialize the app
 initSync();

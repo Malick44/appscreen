@@ -1,5 +1,5 @@
 // Versioned scene templates inspired by bold editorial App Store screenshot layouts.
-const TEMPLATE_CATALOG_VERSION = 4;
+const TEMPLATE_CATALOG_VERSION = 5;
 
 const TIDAL_DEVICE_STYLE = {
   cornerRadius: 32,
@@ -228,7 +228,7 @@ const TIDAL_RELAY_CONTINUATION_CYCLE = [
   { positionMode: 'canvas', centerX: 1.03, centerY: 0.76, scale: 84, x: 50, y: 50, rotation: -38, perspective: 0, opacity: 100 }
 ];
 
-const APP_TEMPLATES = [
+const BASE_APP_TEMPLATES = [
   {
     id: 'violet-orbit-left', name: 'Violet Orbit', category: 'Bold Minimal', version: 1,
     palette: ['#5144F5', '#E9E8F7', '#FFFFFF'],
@@ -497,3 +497,92 @@ const APP_TEMPLATES = [
   },
   ...TIDAL_POSITION_VARIANTS
 ];
+
+const FIXED_SEQUENCE_LENGTHS = [3, 6];
+const SEQUENCE_CONTINUATION_FIELDS = [
+  'continueToNext',
+  'sequenceName',
+  'continuationCycle',
+  'continuationStep',
+  'continuationTextPositions'
+];
+
+function cloneTemplateValue(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function stripSequenceContinuation(device) {
+  const cleaned = cloneTemplateValue(device || {});
+  SEQUENCE_CONTINUATION_FIELDS.forEach(field => delete cleaned[field]);
+  return cleaned;
+}
+
+function fitTerminalDevice(device) {
+  const terminal = stripSequenceContinuation(device);
+  if (terminal.positionMode !== 'canvas') return { ...terminal, continueToNext: false };
+
+  // Finish the story with a fully contained phone instead of another open seam.
+  const scale = Math.min(68, Math.max(1, Number(terminal.scale) || 68));
+  const rotation = Math.max(-8, Math.min(8, Number(terminal.rotation) || 0));
+  const radians = Math.abs(rotation) * Math.PI / 180;
+  const assumedPhoneAspect = 2556 / 1179;
+  const horizontalHalfExtent = scale / 200
+    * (Math.abs(Math.cos(radians)) + assumedPhoneAspect * Math.abs(Math.sin(radians)));
+  const safeMargin = 0.035;
+  const minimumCenter = safeMargin + horizontalHalfExtent;
+  const maximumCenter = Math.max(minimumCenter, 1 - safeMargin - horizontalHalfExtent);
+
+  terminal.scale = scale;
+  terminal.rotation = rotation;
+  terminal.centerX = Math.min(maximumCenter, Math.max(minimumCenter, Number(terminal.centerX) || 0.5));
+  terminal.x = terminal.centerX * 100;
+  terminal.continueToNext = false;
+  return terminal;
+}
+
+function createFixedLengthSequenceTemplate(template, screenCount) {
+  const baseScenes = cloneTemplateValue(template.scenes || []);
+  const currentDeviceCycle = baseScenes.map(scene =>
+    (scene.devices || []).find(device => (device.sourceOffset ?? 0) === 0)
+  ).filter(Boolean);
+  if (!baseScenes.length || !currentDeviceCycle.length) return cloneTemplateValue(template);
+
+  const scenes = Array.from({ length: screenCount }, (_, sceneIndex) => {
+    const scene = cloneTemplateValue(baseScenes[sceneIndex % baseScenes.length]);
+    const currentDevice = stripSequenceContinuation(currentDeviceCycle[sceneIndex % currentDeviceCycle.length]);
+    currentDevice.sourceOffset = 0;
+
+    const devices = [];
+    if (sceneIndex > 0) {
+      const previousDevice = stripSequenceContinuation(
+        currentDeviceCycle[(sceneIndex - 1) % currentDeviceCycle.length]
+      );
+      previousDevice.sourceOffset = -1;
+      if (previousDevice.positionMode === 'canvas' && Number.isFinite(previousDevice.centerX)) {
+        previousDevice.centerX -= 1;
+      }
+      devices.push(previousDevice);
+    }
+
+    devices.push(sceneIndex === screenCount - 1 ? fitTerminalDevice(currentDevice) : currentDevice);
+    scene.devices = devices;
+    return scene;
+  });
+
+  return {
+    ...cloneTemplateValue(template),
+    id: screenCount === 3 ? template.id : `${template.id}-${screenCount}`,
+    version: screenCount === 3 ? Math.max(2, Number(template.version) || 1) : 1,
+    screenCount,
+    fixedLength: true,
+    scenes
+  };
+}
+
+const APP_TEMPLATES = BASE_APP_TEMPLATES.flatMap(template => {
+  if (template.type !== 'sequence') return [{ ...template, screenCount: 1, fixedLength: true }];
+  return FIXED_SEQUENCE_LENGTHS.map(screenCount => createFixedLengthSequenceTemplate(template, screenCount));
+});
+
+// The static editor and backend consume the same versioned template catalog.
+globalThis.AppScreenTemplates = { version: TEMPLATE_CATALOG_VERSION, templates: APP_TEMPLATES };

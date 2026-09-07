@@ -1,0 +1,104 @@
+# Select this Blueprint path when creating the deployment. No deployment has been
+# provisioned by adding this file. Set required values in the Render dashboard.
+# Both services must use the SAME database, bucket, origin, signing secret and
+# pricing. Do not use generateValue twice for a shared signing secret.
+services:
+  - type: web
+    name: appscreen-web
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile.saas
+    dockerContext: .
+    dockerCommand: node --import tsx deploy/start.mjs web
+    preDeployCommand: npm run db:migrate
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 60
+    autoDeployTrigger: 'off'
+    envVars:
+      - fromGroup: appscreen-shared
+      - key: APP_BASE_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: APPSCREEN_SIGNING_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRO_PRICE_ID
+        sync: false
+  - type: worker
+    name: appscreen-worker
+    runtime: docker
+    plan: standard
+    dockerfilePath: ./Dockerfile.saas
+    dockerContext: .
+    dockerCommand: node --import tsx deploy/start.mjs worker
+    maxShutdownDelaySeconds: 120
+    autoDeployTrigger: 'off'
+    envVars:
+      - fromGroup: appscreen-shared
+      - key: APP_BASE_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: APPSCREEN_SIGNING_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRO_PRICE_ID
+        sync: false
+envVarGroups:
+  - name: appscreen-shared
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: '8001'
+      - key: APPSCREEN_DEV_AUTH
+        value: 'false'
+      - key: APPSCREEN_EMBEDDED_WORKER
+        value: 'false'
+      - key: APPSCREEN_ENABLE_AI
+        value: 'false'
+      - key: APPSCREEN_MCP_OAUTH
+        value: 'false'
+      - key: APPSCREEN_EMAIL_ENABLED
+        value: 'false'
+      - key: APPSCREEN_EMAIL_FROM
+        value: ''
+      - key: SUPABASE_STORAGE_BUCKET
+        value: appscreen-private
+      - key: OPENAI_MODEL
+        value: gpt-6-astra
+      - key: TRIAL_CREDITS
+        value: '5'
+      - key: PRO_MONTHLY_CREDITS
+        value: '100'
+      - key: DESIGN_CREDITS
+        value: '5'
+      - key: REVISION_CREDITS
+        value: '1'
+      - key: MAX_CONCURRENT_JOBS
+        value: '2'
+      - key: MAX_STORAGE_BYTES
+        value: '524288000'

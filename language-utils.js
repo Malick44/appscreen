@@ -294,13 +294,13 @@ function updateScreenshotTranslationsList() {
 
             item.innerHTML = `
                 <div class="translation-thumb">
-                    <img src="${thumbCanvas.toDataURL()}" alt="${name}">
+                    <img src="${escapeInspectorText(thumbCanvas.toDataURL())}" alt="${escapeInspectorText(name)}">
                 </div>
                 <div class="translation-info">
-                    <span class="flag">${flag}</span>
-                    <span class="name">${name}</span>
+                    <span class="flag">${escapeInspectorText(flag)}</span>
+                    <span class="name">${escapeInspectorText(name)}</span>
                 </div>
-                <button class="translation-remove" title="Remove ${name} screenshot">
+                <button class="translation-remove" title="Remove ${escapeInspectorText(name)} screenshot">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M18 6L6 18M6 6l12 12"/>
                     </svg>
@@ -320,10 +320,10 @@ function updateScreenshotTranslationsList() {
                     </svg>
                 </div>
                 <div class="translation-info">
-                    <span class="flag">${flag}</span>
-                    <span class="name">${name}</span>
+                    <span class="flag">${escapeInspectorText(flag)}</span>
+                    <span class="name">${escapeInspectorText(name)}</span>
                 </div>
-                <button class="translation-upload" title="Upload ${name} screenshot">
+                <button class="translation-upload" title="Upload ${escapeInspectorText(name)} screenshot">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
                         <polyline points="17 8 12 3 7 8"/>
@@ -473,7 +473,7 @@ function showDuplicateDialog(params) {
         const existingLangImg = screenshot.localizedImages?.[params.detectedLang]?.image;
         if (existingThumb) {
             if (existingLangImg) {
-                existingThumb.innerHTML = `<img src="${existingLangImg.src}" alt="Existing">`;
+                existingThumb.innerHTML = `<img src="${escapeInspectorText(existingLangImg.src)}" alt="Existing">`;
             } else {
                 // No existing image for this language - show empty placeholder
                 existingThumb.innerHTML = `
@@ -488,7 +488,7 @@ function showDuplicateDialog(params) {
 
         // Set new thumbnail
         if (newThumb && params.newImage) {
-            newThumb.innerHTML = `<img src="${params.newSrc}" alt="New">`;
+            newThumb.innerHTML = `<img src="${escapeInspectorText(params.newSrc)}" alt="New">`;
         }
 
         // Set filenames

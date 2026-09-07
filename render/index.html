@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>AppScreen Render</title><style>html,body{margin:0;background:transparent}canvas{display:block;max-width:100%;height:auto}</style></head>
+<body><canvas id="output" aria-label="Campaign render"></canvas><script type="module">
+import { renderScene } from '/core/render.mjs';
+window.AppScreenRenderer = {
+  async render({ document, sceneId, assets = {}, locale }) {
+    const canvas = window.document.getElementById('output');
+    const result = await renderScene(canvas, document, sceneId, { locale: locale || document.locale, resolveAsset: async id => {
+      if (!assets[id]) throw new Error(`Missing render asset ${id}`);
+      return assets[id];
+    }});
+    return { ...result, png: canvas.toDataURL('image/png') };
+  }
+};
+window.dispatchEvent(new Event('app-screen-renderer-ready'));
+</script></body></html>

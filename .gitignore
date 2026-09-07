@@ -22,5 +22,9 @@ frontend-dist/
 *.AppImage
 *.deb
 *.snap
-.env    
-
+.env
+.env.local
+.env.saas
+.appscreen-data/
+test-results/
+playwright-report/

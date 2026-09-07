@@ -1,0 +1,42 @@
+# syntax=docker/dockerfile:1.7
+# Separate from the legacy static-site image. Playwright + Chromium are resolved
+# from package-lock.json; update the lock, image pin and regression tests together.
+FROM node:22.22.3-bookworm-slim@sha256:e21fc383b50d5347dc7a9f1cae45b8f4e2f0d39f7ade28e4eef7d2934522b752
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/appscreen-browsers \
+    TZ=UTC \
+    NODE_ENV=production \
+    PORT=8001 \
+    APPSCREEN_DEV_AUTH=false \
+    APPSCREEN_EMBEDDED_WORKER=false \
+    APPSCREEN_ENABLE_AI=false
+
+WORKDIR /opt/appscreen
+COPY package.json package-lock.json ./
+# Playwright is currently a devDependency but is required by the render worker.
+# No provider/database secrets are needed or consumed during image construction.
+RUN npm ci --include=dev --no-audit --no-fund \
+    && node -e "if(require('playwright/package.json').version!=='1.59.1')throw Error('Update the reviewed browser pin')" \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tini \
+    && ./node_modules/.bin/playwright install --with-deps chromium \
+    && chmod -R a+rX /opt/appscreen-browsers
+
+COPY server/ ./server/
+COPY supabase/migrations/ ./supabase/migrations/
+COPY core/ ./core/
+COPY render/ ./render/
+COPY saas/ ./saas/
+COPY img/ ./img/
+COPY models/ ./models/
+COPY deploy/ ./deploy/
+COPY index.html app.js styles.css ui-redesign.css three-renderer.js language-utils.js magical-titles.js llm.js ai-image-gen.js lucide-icons.js templates.js ./
+
+# Chromium's sandbox requires a non-root account AND host namespace support.
+# Do not replace this with root or --no-sandbox; see SAAS_SETUP.md's launch gate.
+USER node
+EXPOSE 8001
+# Render probes /health for the web service. A worker has no HTTP listener;
+# inheriting a web-only Docker HEALTHCHECK would mark healthy workers unhealthy.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["node", "--import", "tsx", "deploy/start.mjs", "web"]

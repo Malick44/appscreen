@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#121421" />
+    <meta
+      name="description"
+      content="Turn real app screenshots into a coordinated, editable App Store campaign with AppScreen."
+    />
+    <title>AppScreen — Your app, beautifully presented</title>
+    <link rel="icon" href="/img/icon.png" />
+    <link rel="stylesheet" href="/saas/styles.css" />
+    <script type="module" src="/saas/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div id="app">
+      <main id="main" class="loading-page" aria-busy="true">
+        <span class="brand-mark" aria-hidden="true">a</span>
+        <p>Opening AppScreen…</p>
+      </main>
+    </div>
+    <div
+      id="announcer"
+      class="sr-only"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+    <div
+      id="toasts"
+      class="toasts"
+      aria-live="polite"
+      aria-atomic="false"
+    ></div>
+    <dialog id="modal" aria-labelledby="modal-title"></dialog>
+    <noscript
+      >AppScreen needs JavaScript for its editor, account, and campaign
+      tools.</noscript
+    >
+  </body>
+</html>

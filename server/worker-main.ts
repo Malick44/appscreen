@@ -1,0 +1,10 @@
+import 'dotenv/config';
+import { loadConfig } from './config.js';
+import { createDatabase,migrate,verifyMigrations } from './db.js';
+import { AppServices } from './services.js';
+import { createStorage } from './storage.js';
+import { Billing } from './billing.js';
+import { createWorker } from './worker.js';
+const config=loadConfig(),db=createDatabase(config.databaseUrl);await (config.production?verifyMigrations(db):migrate(db));const services=new AppServices(db,config,createStorage(config));const worker=createWorker(services,new Billing(services));await worker.start();
+console.log('AppScreen background worker ready.');
+async function close(){await worker.stop();await db.end();}process.on('SIGINT',()=>void close());process.on('SIGTERM',()=>void close());

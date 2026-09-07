@@ -407,9 +407,14 @@ html.tauri-app .right-sidebar {
     color: var(--text-secondary);
     margin-top: 2px;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 5px;
     min-width: 0;
+}
+
+.screenshot-source-label {
+    white-space: nowrap;
 }
 
 .sequence-link-badge {
