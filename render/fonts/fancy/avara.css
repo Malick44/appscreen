@@ -1,0 +1,9 @@
+/* Avara by Raphael Bastide, Wei Huang and Lucas Le Bihan. SIL OFL 1.1; see Avara-OFL.txt and NOTICE.md. */
+@font-face {
+    font-family: 'AvaraBold';
+    src: url('./AvaraBold.ttf') format('truetype');
+    /* Preserve the upstream Font Library face's normal-weight registration. */
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}

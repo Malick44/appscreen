@@ -11,12 +11,16 @@ let magicalTitlesTooltipShown = false;
 function showMagicalTitlesTooltip() {
     // Don't show if already shown this session or dismissed before
     if (magicalTitlesTooltipShown) return;
-    if (localStorage.getItem('magicalTitlesTooltipDismissed')) return;
+    try {
+        if (localStorage.getItem('magicalTitlesTooltipDismissed')) return;
+    } catch (_) {
+        // Continue without persistence in storage-restricted previews.
+    }
 
     // Don't show if no API key is configured
     const provider = getSelectedProvider();
     const providerConfig = llmProviders[provider];
-    const apiKey = localStorage.getItem(providerConfig.storageKey);
+    const apiKey = getApiKey(provider);
     if (!apiKey) return;
 
     magicalTitlesTooltipShown = true;
@@ -52,7 +56,11 @@ function dismissMagicalTitlesTooltip() {
     if (tooltip) {
         tooltip.remove();
     }
-    localStorage.setItem('magicalTitlesTooltipDismissed', 'true');
+    try {
+        localStorage.setItem('magicalTitlesTooltipDismissed', 'true');
+    } catch (_) {
+        // Dismiss for this session even when persistence is unavailable.
+    }
 }
 
 /**
@@ -252,7 +260,7 @@ function showMagicalTitlesDialog() {
     // Get provider and API key
     const provider = getSelectedProvider();
     const providerConfig = llmProviders[provider];
-    const apiKey = localStorage.getItem(providerConfig.storageKey);
+    const apiKey = getApiKey(provider);
 
     if (!apiKey) {
         showAppAlert('Please configure your AI API key in Settings first.', 'error');
@@ -291,7 +299,7 @@ async function generateMagicalTitles() {
     // Get provider and API key
     const provider = getSelectedProvider();
     const providerConfig = llmProviders[provider];
-    const apiKey = localStorage.getItem(providerConfig.storageKey);
+    const apiKey = getApiKey(provider);
 
     // Get selected language from dropdown
     const langSelect = document.getElementById('magical-titles-language');

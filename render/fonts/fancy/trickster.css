@@ -1,0 +1,8 @@
+/* Trickster by Jean-Baptiste Morizot. SIL OFL 1.1; see Trickster-OFL.txt and NOTICE.md. */
+@font-face {
+    font-family: 'TricksterRegular';
+    src: url('./TricksterRegular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}

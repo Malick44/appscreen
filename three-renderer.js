@@ -12,6 +12,7 @@ let isThreeJSInitialized = false;
 let phoneModelLoaded = false;
 let phoneModelLoading = false;
 let phoneModelLoadRequestId = 0;
+let lastThreeDUnavailableMessage = '';
 
 // Screen texture for the screenshot
 let screenTexture = null;
@@ -27,6 +28,35 @@ let currentDeviceModel = 'iphone';
 
 // Cache for loaded phone models (for rendering different devices in side previews)
 let phoneModelCache = {};  // { deviceType: { model, pivot, screenPlane, baseScale, loaded } }
+
+function reportThreeDUnavailable(deviceType = 'iphone', error = null) {
+    const launchedFromFile = typeof window !== 'undefined' && window.location?.protocol === 'file:';
+    const deviceLabel = deviceType === 'samsung' ? 'Samsung' : 'iPhone';
+    const message = launchedFromFile
+        ? '3D requires the local server. Open http://localhost:8000/ instead of index.html directly.'
+        : `${deviceLabel} 3D could not start. Check WebGL and reload the page.`;
+    if (message === lastThreeDUnavailableMessage) return;
+    lastThreeDUnavailableMessage = message;
+
+    if (error) console.error(message, error);
+    if (typeof setWorkspaceStatus === 'function') setWorkspaceStatus('error', '3D unavailable');
+    if (typeof showTemplateToast === 'function') showTemplateToast(message);
+}
+
+function clearThreeDUnavailable() {
+    const hadReportedError = Boolean(lastThreeDUnavailableMessage);
+    lastThreeDUnavailableMessage = '';
+    const status = typeof document !== 'undefined' ? document.getElementById('save-status') : null;
+    const statusCopy = status?.querySelector('.status-copy')?.textContent;
+    if (hadReportedError && status?.classList.contains('is-error') && statusCopy === '3D unavailable'
+        && typeof setWorkspaceStatus === 'function') {
+        setWorkspaceStatus('saved', '3D ready', 1800);
+    }
+}
+
+function isThreeJSRendererReady() {
+    return Boolean(isThreeJSInitialized && threeRenderer && threeScene && threeCamera);
+}
 
 // Device-specific configurations
 const deviceConfigs = {
@@ -97,6 +127,7 @@ function setPhoneFrameColor(presetId, deviceType) {
     if (!phoneModel) return;
 
     deviceType = deviceType || currentDeviceModel;
+    if (deviceType !== currentDeviceModel) return;
     const presets = frameColorPresets[deviceType];
     if (!presets) return;
 
@@ -142,6 +173,10 @@ function initThreeJS() {
 
     const container = document.getElementById('threejs-container');
     if (!container) return;
+    if (typeof window !== 'undefined' && window.location?.protocol === 'file:') {
+        reportThreeDUnavailable();
+        return;
+    }
 
     // Create scene with a gradient background color (we'll update this dynamically)
     threeScene = new THREE.Scene();
@@ -154,12 +189,20 @@ function initThreeJS() {
 
     // Create renderer - disable antialiasing for faster interactive performance
     // Quality rendering is done at export time with higher resolution
-    threeRenderer = new THREE.WebGLRenderer({
-        antialias: false,  // Disable for better performance
-        alpha: true,
-        preserveDrawingBuffer: true,
-        powerPreference: 'high-performance'
-    });
+    try {
+        threeRenderer = new THREE.WebGLRenderer({
+            antialias: false,  // Disable for better performance
+            alpha: true,
+            preserveDrawingBuffer: true,
+            powerPreference: 'high-performance'
+        });
+    } catch (error) {
+        threeRenderer = null;
+        threeScene = null;
+        threeCamera = null;
+        reportThreeDUnavailable(currentDeviceModel, error);
+        return;
+    }
     threeRenderer.setSize(400, 700);
     // Use device pixel ratio of 1 for fastest interactive rendering
     threeRenderer.setPixelRatio(1);
@@ -237,6 +280,7 @@ function loadPhoneModel() {
             }
             phoneModelLoading = false;
             phoneModel = gltf.scene;
+            clearThreeDUnavailable();
 
             // Center and scale the model
             const box = new THREE.Box3().setFromObject(phoneModel);
@@ -340,7 +384,7 @@ function loadPhoneModel() {
 
                 // Refresh canvas now that model is loaded (needed for side previews too)
                 if (typeof updateCanvas === 'function') {
-                    updateCanvas();
+                    updateCanvas({ persist: false });
                 }
             }
 
@@ -354,7 +398,7 @@ function loadPhoneModel() {
             if (requestId !== phoneModelLoadRequestId) return;
             phoneModelLoading = false;
             phoneModelLoaded = false;
-            console.error('Error loading phone model:', error);
+            reportThreeDUnavailable(deviceType, error);
         }
     );
 }
@@ -363,6 +407,12 @@ function loadPhoneModel() {
 function switchPhoneModel(deviceType) {
     if (!deviceConfigs[deviceType]) {
         console.error('Unknown device type:', deviceType);
+        return;
+    }
+    if (!isThreeJSRendererReady()) {
+        if (typeof window !== 'undefined' && window.location?.protocol === 'file:') {
+            reportThreeDUnavailable(deviceType);
+        }
         return;
     }
 
@@ -418,6 +468,7 @@ function switchPhoneModel(deviceType) {
             }
             phoneModelLoading = false;
             phoneModel = gltf.scene;
+            clearThreeDUnavailable();
 
             // Center and scale the model
             const box = new THREE.Box3().setFromObject(phoneModel);
@@ -467,7 +518,7 @@ function switchPhoneModel(deviceType) {
 
                 // Only call updateCanvas if not suppressed (e.g., during slide transitions)
                 if (typeof updateCanvas === 'function' && !window.suppressSwitchModelUpdate) {
-                    updateCanvas();
+                    updateCanvas({ persist: false });
                 }
             }
 
@@ -481,7 +532,7 @@ function switchPhoneModel(deviceType) {
             if (requestId !== phoneModelLoadRequestId) return;
             phoneModelLoading = false;
             phoneModelLoaded = false;
-            console.error('Error loading ' + deviceType + ' model:', error);
+            reportThreeDUnavailable(deviceType, error);
         }
     );
 }
@@ -563,14 +614,15 @@ function loadCachedPhoneModel(deviceType) {
                     loaded: true,
                     loading: false
                 };
+                clearThreeDUnavailable();
 
                 console.log('Cached ' + deviceType + ' model for side previews');
                 resolve(phoneModelCache[deviceType]);
             },
             undefined,
             (error) => {
-                console.error('Error loading cached ' + deviceType + ' model:', error);
                 phoneModelCache[deviceType] = { loading: false, loaded: false };
+                reportThreeDUnavailable(deviceType, error);
                 reject(error);
             }
         );
@@ -758,243 +810,259 @@ function animateThreeJS() {
     requestThreeJSRender();
 }
 
-// Render 3D phone only (with transparent background) to be composited
-function renderThreeJSToCanvas(targetCanvas, width, height) {
-    if (!threeRenderer || !threeScene || !threeCamera || !phonePivot) return;
+const pendingThreeDRenderLoads = new Set();
 
-    const dims = { width: width || 1290, height: height || 2796 };
-
-    // Store original values
-    const originalBackground = threeScene.background;
-    const originalPosition = phonePivot.position.clone();
-    const originalScale = phonePivot.scale.clone();
-    const originalRotation = phonePivot.rotation.clone();
-
-    // Apply position, scale, and rotation from screenshot settings
-    if (typeof state !== 'undefined') {
-        // Use getScreenshotSettings() helper if available, otherwise fall back to defaults
-        const ss = typeof getScreenshotSettings === 'function' ? getScreenshotSettings() : state.defaults?.screenshot;
-        if (ss) {
-            // Scale: use screenshot.scale to adjust model size
-            const screenshotScale = ss.scale / 100;
-            phonePivot.scale.setScalar(screenshotScale);
-
-            // Position: match 2D behavior where available space depends on (1 - scale)
-            // This ensures same percentages look the same in 2D and 3D
-            // X uses smaller factor (1.1) since canvas is taller than wide (400x700 aspect)
-            const availableSpaceY = (1 - screenshotScale) * 2;
-            const availableSpaceX = (1 - screenshotScale) * 0.9;
-            const xOffset = ((ss.x - 50) / 50) * availableSpaceX;
-            const yOffset = -((ss.y - 50) / 50) * availableSpaceY; // Inverted for 3D
-            phonePivot.position.set(
-                xOffset + basePositionOffset.x,
-                yOffset + basePositionOffset.y,
-                basePositionOffset.z
-            );
-
-            // Rotation: apply 3D rotation from current screenshot settings + model base rotation
-            const rotation3D = ss.rotation3D || { x: 0, y: 0, z: 0 };
-            const config = deviceConfigs[currentDeviceModel] || deviceConfigs.iphone;
-            const modelRot = config.modelRotation || { x: 0, y: 0, z: 0 };
-            phonePivot.rotation.set(
-                (rotation3D.x + modelRot.x) * Math.PI / 180,
-                (rotation3D.y + modelRot.y) * Math.PI / 180,
-                (rotation3D.z + modelRot.z) * Math.PI / 180
-            );
-        }
+function getThreeDModelHandle(deviceType) {
+    if (!deviceConfigs[deviceType]) return null;
+    if (deviceType === currentDeviceModel && phoneModelLoaded && phoneModel && phonePivot && customScreenPlane) {
+        return { deviceType, model: phoneModel, pivot: phonePivot, screenPlane: customScreenPlane, current: true };
     }
-
-    // Set transparent background for compositing
-    threeScene.background = null;
-    threeRenderer.setClearColor(0x000000, 0); // Fully transparent clear color
-
-    // Temporarily resize renderer
-    const oldSize = { width: 400, height: 700 };
-    threeRenderer.setSize(dims.width, dims.height);
-    threeCamera.aspect = dims.width / dims.height;
-    threeCamera.updateProjectionMatrix();
-
-    // Clear the renderer before drawing (ensures clean transparency)
-    threeRenderer.clear();
-
-    // Render with transparency
-    threeRenderer.render(threeScene, threeCamera);
-
-    // Draw to target canvas (compositing the 3D phone onto existing content)
-    const ctx = targetCanvas.getContext('2d');
-    ctx.drawImage(threeRenderer.domElement, 0, 0, dims.width, dims.height);
-
-    // Restore size, background, and model transforms
-    threeRenderer.setSize(oldSize.width, oldSize.height);
-    threeCamera.aspect = oldSize.width / oldSize.height;
-    threeCamera.updateProjectionMatrix();
-    threeScene.background = originalBackground;
-    phonePivot.position.copy(originalPosition);
-    phonePivot.scale.copy(originalScale);
-    phonePivot.rotation.copy(originalRotation);
+    const cached = phoneModelCache[deviceType];
+    return cached?.loaded
+        ? { deviceType, model: cached.model, pivot: cached.pivot, screenPlane: cached.screenPlane, current: false }
+        : null;
 }
 
-// Render 3D for a specific screenshot index (used for side previews)
-function renderThreeJSForScreenshot(targetCanvas, width, height, screenshotIndex) {
-    if (!threeRenderer || !threeScene || !threeCamera) return;
-    if (typeof state === 'undefined' || !state.screenshots[screenshotIndex]) return;
+function isPhoneModelReady(deviceType = currentDeviceModel) {
+    return Boolean(getThreeDModelHandle(deviceType));
+}
 
-    const screenshot = state.screenshots[screenshotIndex];
-    const ss = screenshot.screenshot;
-    const dims = { width: width || 1290, height: height || 2796 };
+function requestThreeDModelForRender(deviceType) {
+    if (!deviceConfigs[deviceType] || isPhoneModelReady(deviceType) || pendingThreeDRenderLoads.has(deviceType)) return;
+    // The active model loader already refreshes the canvas when it completes.
+    if (deviceType === currentDeviceModel && phoneModelLoading) return;
+    pendingThreeDRenderLoads.add(deviceType);
+    loadCachedPhoneModel(deviceType)
+        .then(() => {
+            if (typeof updateCanvas === 'function') updateCanvas({ persist: false });
+        })
+        .catch(() => {})
+        .finally(() => pendingThreeDRenderLoads.delete(deviceType));
+}
 
-    // Determine which device model this screenshot uses
-    const screenshotDeviceType = ss.device3D || 'iphone';
-    const config = deviceConfigs[screenshotDeviceType] || deviceConfigs.iphone;
-
-    // Check if this screenshot uses the same device as currently active
-    const useCurrentModel = screenshotDeviceType === currentDeviceModel && phonePivot;
-
-    // Get the model to use (either current or from cache)
-    let pivotToUse, screenPlaneToUse;
-
-    if (useCurrentModel) {
-        // Use the currently loaded model
-        pivotToUse = phonePivot;
-        screenPlaneToUse = customScreenPlane;
-    } else {
-        // Use cached model for different device
-        const cached = phoneModelCache[screenshotDeviceType];
-        if (!cached?.loaded) {
-            // Model not cached yet - trigger loading and skip this render
-            loadCachedPhoneModel(screenshotDeviceType).then(() => {
-                // Trigger a re-render once model is loaded
-                if (typeof updateCanvas === 'function') {
-                    updateCanvas();
-                }
-            });
-            return;
-        }
-        pivotToUse = cached.pivot;
-        screenPlaneToUse = cached.screenPlane;
-
-        // Add cached pivot to scene temporarily
-        threeScene.add(pivotToUse);
-    }
-
-    // Store original values
-    const originalBackground = threeScene.background;
-    const originalPosition = pivotToUse.position.clone();
-    const originalScale = pivotToUse.scale.clone();
-    const originalRotation = pivotToUse.rotation.clone();
-
-    // Hide the current model if we're using a different one
-    if (!useCurrentModel && phonePivot) {
-        phonePivot.visible = false;
-    }
-
-    // Temporarily update screen texture for this screenshot
-    // Use getScreenshotImage() for localized image support
-    const screenshotImage = typeof getScreenshotImage === 'function'
-        ? getScreenshotImage(screenshot)
-        : screenshot?.image;
-    const oldMaterial = screenPlaneToUse ? screenPlaneToUse.material : null;
-    if (screenshotImage && screenPlaneToUse) {
-        const cornerRadius = Math.round(screenshotImage.width * config.cornerRadiusFactor);
-        const roundedImage = createRoundedScreenImage(screenshotImage, cornerRadius);
-        const newTexture = new THREE.Texture(roundedImage);
-        newTexture.needsUpdate = true;
-        newTexture.encoding = THREE.sRGBEncoding;
-        newTexture.flipY = true;
-
-        const newMaterial = new THREE.MeshBasicMaterial({
-            map: newTexture,
-            side: THREE.FrontSide,
-            transparent: true
+function forEachModelMaterial(model, callback) {
+    const visited = new Set();
+    model?.traverse(child => {
+        if (!child.isMesh || !child.material) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach(material => {
+            if (!material || visited.has(material)) return;
+            visited.add(material);
+            callback(material);
         });
-        screenPlaneToUse.material = newMaterial;
-    }
+    });
+}
 
-    // Apply frame color for this screenshot
-    if (ss.frameColor) {
-        if (useCurrentModel) {
-            setPhoneFrameColor(ss.frameColor, screenshotDeviceType);
-        } else {
-            setCachedModelFrameColor(ss.frameColor, screenshotDeviceType);
+function snapshotModelColors(model) {
+    const snapshot = [];
+    forEachModelMaterial(model, material => {
+        if (material.color?.clone) snapshot.push({ material, color: material.color.clone() });
+    });
+    return snapshot;
+}
+
+function restoreModelColors(snapshot) {
+    snapshot.forEach(({ material, color }) => material.color?.copy(color));
+}
+
+function applyModelFrameColor(model, presetId, deviceType) {
+    const presets = frameColorPresets[deviceType] || [];
+    const preset = presets.find(candidate => candidate.id === presetId) || presets[0];
+    if (!preset) return;
+    forEachModelMaterial(model, material => {
+        const materialName = (material.name || '').toLowerCase();
+        if (preset.materials[materialName] && material.color?.set) {
+            material.color.set(preset.materials[materialName]);
         }
+    });
+}
+
+function getCameraViewSnapshot(camera) {
+    return camera.view ? { ...camera.view } : null;
+}
+
+function restoreCameraView(camera, view) {
+    camera.view = view ? { ...view } : null;
+}
+
+function applyThreeDPlacementTransform(pivot, settings, dims, screenIndex, screenCount, deviceType) {
+    const scale = Math.max(0.01, Number(settings.scale ?? 70) / 100);
+    const config = deviceConfigs[deviceType] || deviceConfigs.iphone;
+    const modelRotation = config.modelRotation || { x: 0, y: 0, z: 0 };
+    const rotation3D = settings.rotation3D || { x: 0, y: 0, z: 0 };
+    const cameraDistance = Math.abs(threeCamera.position.z - basePositionOffset.z);
+    const worldHeight = 2 * Math.tan(THREE.MathUtils.degToRad(threeCamera.fov) / 2) * cameraDistance;
+    const screenWorldWidth = worldHeight * (dims.width / dims.height);
+    let worldX;
+    let worldY;
+
+    if (settings.positionMode === 'canvas'
+        && Number.isFinite(settings.centerX)
+        && Number.isFinite(settings.centerY)) {
+        // Canvas coordinates are globalized across the virtual strip. Matching
+        // outgoing/incoming placements therefore render as two crops of the same
+        // 3D object, keeping a continuation exact at the screen seam.
+        worldX = (screenIndex + settings.centerX - screenCount / 2) * screenWorldWidth;
+        worldY = (0.5 - settings.centerY) * worldHeight;
+    } else {
+        // Preserve the established single-screen 3D positioning semantics. The
+        // screen's strip center is the origin for these local offsets.
+        const screenCenterX = (screenIndex + 0.5 - screenCount / 2) * screenWorldWidth;
+        const availableSpaceY = (1 - scale) * 2;
+        const availableSpaceX = (1 - scale) * 0.9;
+        worldX = screenCenterX + ((Number(settings.x ?? 50) - 50) / 50) * availableSpaceX;
+        worldY = -((Number(settings.y ?? 50) - 50) / 50) * availableSpaceY;
     }
 
-    // Apply rotation for this screenshot + model base rotation
-    const rotation3D = ss.rotation3D || { x: 0, y: 0, z: 0 };
-    const modelRot = config.modelRotation || { x: 0, y: 0, z: 0 };
-    pivotToUse.rotation.set(
-        (rotation3D.x + modelRot.x) * Math.PI / 180,
-        (rotation3D.y + modelRot.y) * Math.PI / 180,
-        (rotation3D.z + modelRot.z) * Math.PI / 180
+    pivot.position.set(worldX + basePositionOffset.x, worldY + basePositionOffset.y, basePositionOffset.z);
+    pivot.scale.setScalar(scale);
+    pivot.rotation.set(
+        (Number(rotation3D.x || 0) + modelRotation.x) * Math.PI / 180,
+        (Number(rotation3D.y || 0) + modelRotation.y) * Math.PI / 180,
+        (Number(rotation3D.z || 0) + Number(settings.rotation || 0) + modelRotation.z) * Math.PI / 180
     );
+}
 
-    // Apply scale and position (matching 2D behavior)
-    const screenshotScale = ss.scale / 100;
-    pivotToUse.scale.setScalar(screenshotScale);
-    const availableSpaceY = (1 - screenshotScale) * 2;
-    const availableSpaceX = (1 - screenshotScale) * 0.9;
-    const xOffset = ((ss.x - 50) / 50) * availableSpaceX;
-    const yOffset = -((ss.y - 50) / 50) * availableSpaceY;
-    pivotToUse.position.set(
-        xOffset + basePositionOffset.x,
-        yOffset + basePositionOffset.y,
-        basePositionOffset.z
-    );
+function renderThreeDItemsToCanvas(targetCanvas, width, height, items) {
+    if (!threeRenderer || !threeScene || !threeCamera || !targetCanvas || !Array.isArray(items)) return false;
+    const dims = { width: width || 1290, height: height || 2796 };
+    const targetContext = targetCanvas.getContext('2d');
+    if (!targetContext) return false;
+    const originalBackground = threeScene.background;
+    const originalSize = threeRenderer.getSize(new THREE.Vector2());
+    const originalPixelRatio = threeRenderer.getPixelRatio();
+    const originalClearColor = threeRenderer.getClearColor(new THREE.Color()).clone();
+    const originalClearAlpha = threeRenderer.getClearAlpha();
+    const originalAspect = threeCamera.aspect;
+    const originalView = getCameraViewSnapshot(threeCamera);
+    let rendered = false;
 
-    // Set transparent background for compositing
-    threeScene.background = null;
-    threeRenderer.setClearColor(0x000000, 0); // Fully transparent clear color
+    try {
+        threeScene.background = null;
+        threeRenderer.setPixelRatio(1);
+        threeRenderer.setClearColor(0x000000, 0);
+        threeRenderer.setSize(dims.width, dims.height, false);
 
-    // Temporarily resize renderer
-    const oldSize = { width: 400, height: 700 };
-    threeRenderer.setSize(dims.width, dims.height);
-    threeCamera.aspect = dims.width / dims.height;
-    threeCamera.updateProjectionMatrix();
+        items.forEach(item => {
+            if (!item?.image) return;
+            const settings = item.settings || {};
+            const deviceType = deviceConfigs[settings.device3D] ? settings.device3D : 'iphone';
+            const handle = getThreeDModelHandle(deviceType);
+            if (!handle) {
+                requestThreeDModelForRender(deviceType);
+                return;
+            }
 
-    // Clear the renderer before drawing (ensures clean transparency)
-    threeRenderer.clear();
+            const { model, pivot, screenPlane } = handle;
+            if (!model || !pivot || !screenPlane) return;
+            const originalParent = pivot.parent;
+            const originalPosition = pivot.position.clone();
+            const originalScale = pivot.scale.clone();
+            const originalRotation = pivot.rotation.clone();
+            const originalVisibility = pivot.visible;
+            const currentVisibility = phonePivot?.visible;
+            const originalScreenMaterial = screenPlane.material;
+            const colorSnapshot = snapshotModelColors(model);
+            let temporaryMaterial = null;
 
-    // Render with transparency
-    threeRenderer.render(threeScene, threeCamera);
+            try {
+                const viewportCount = item.viewport?.screenCount === 2 ? 2 : 1;
+                const viewportIndex = viewportCount === 2 && item.viewport?.screenIndex === 1 ? 1 : 0;
+                threeCamera.aspect = (dims.width * viewportCount) / dims.height;
+                if (viewportCount === 2) {
+                    threeCamera.setViewOffset(
+                        dims.width * viewportCount,
+                        dims.height,
+                        viewportIndex * dims.width,
+                        0,
+                        dims.width,
+                        dims.height
+                    );
+                } else {
+                    threeCamera.clearViewOffset();
+                }
+                threeCamera.updateProjectionMatrix();
 
-    // Draw to target canvas (composite 3D phone onto existing background)
-    const ctx = targetCanvas.getContext('2d');
-    ctx.drawImage(threeRenderer.domElement, 0, 0, dims.width, dims.height);
+                if (originalParent !== threeScene) threeScene.add(pivot);
+                if (phonePivot && pivot !== phonePivot) phonePivot.visible = false;
+                pivot.visible = true;
+                applyModelFrameColor(model, settings.frameColor, deviceType);
 
-    // Restore everything
-    threeRenderer.setSize(oldSize.width, oldSize.height);
-    threeCamera.aspect = oldSize.width / oldSize.height;
-    threeCamera.updateProjectionMatrix();
-    threeScene.background = originalBackground;
-    pivotToUse.position.copy(originalPosition);
-    pivotToUse.scale.copy(originalScale);
-    pivotToUse.rotation.copy(originalRotation);
+                const sourceWidth = item.image.naturalWidth || item.image.width || 1;
+                const roundedImage = createRoundedScreenImage(
+                    item.image,
+                    Math.round(sourceWidth * (deviceConfigs[deviceType]?.cornerRadiusFactor || 0))
+                );
+                const texture = new THREE.Texture(roundedImage);
+                texture.needsUpdate = true;
+                texture.encoding = THREE.sRGBEncoding;
+                texture.flipY = true;
+                temporaryMaterial = new THREE.MeshBasicMaterial({
+                    map: texture,
+                    side: THREE.FrontSide,
+                    transparent: true
+                });
+                screenPlane.material = temporaryMaterial;
+                applyThreeDPlacementTransform(pivot, settings, dims, viewportIndex, viewportCount, deviceType);
 
-    // Restore original material
-    if (oldMaterial && screenPlaneToUse) {
-        // Dispose the temporary material
-        if (screenPlaneToUse.material !== oldMaterial) {
-            screenPlaneToUse.material.map?.dispose();
-            screenPlaneToUse.material.dispose();
-        }
-        screenPlaneToUse.material = oldMaterial;
+                threeRenderer.clear();
+                threeRenderer.render(threeScene, threeCamera);
+                targetContext.save();
+                try {
+                    targetContext.globalAlpha = Math.max(0, Math.min(1, Number(settings.opacity ?? 100) / 100));
+                    targetContext.drawImage(threeRenderer.domElement, 0, 0, dims.width, dims.height);
+                } finally {
+                    targetContext.restore();
+                }
+                rendered = true;
+            } finally {
+                screenPlane.material = originalScreenMaterial;
+                temporaryMaterial?.map?.dispose();
+                temporaryMaterial?.dispose();
+                restoreModelColors(colorSnapshot);
+                pivot.position.copy(originalPosition);
+                pivot.scale.copy(originalScale);
+                pivot.rotation.copy(originalRotation);
+                pivot.visible = originalVisibility;
+                if (originalParent !== threeScene) {
+                    threeScene.remove(pivot);
+                    if (originalParent) originalParent.add(pivot);
+                }
+                if (phonePivot) phonePivot.visible = currentVisibility;
+            }
+        });
+    } finally {
+        threeRenderer.setPixelRatio(originalPixelRatio);
+        threeRenderer.setSize(originalSize.x, originalSize.y, false);
+        threeRenderer.setClearColor(originalClearColor, originalClearAlpha);
+        threeScene.background = originalBackground;
+        threeCamera.aspect = originalAspect;
+        restoreCameraView(threeCamera, originalView);
+        threeCamera.updateProjectionMatrix();
     }
+    return rendered;
+}
 
-    // Restore frame color on current model if we changed it
-    if (useCurrentModel && ss.frameColor && typeof state !== 'undefined') {
-        const currentSS = typeof getScreenshotSettings === 'function' ? getScreenshotSettings() : null;
-        if (currentSS?.frameColor) {
-            setPhoneFrameColor(currentSS.frameColor, currentDeviceModel);
-        }
+// Render every visible placement in template layer order. Standalone devices use
+// a local camera; only the two halves of a linked seam share a two-screen camera.
+function renderThreeJSToCanvas(targetCanvas, width, height, items, screenIndex) {
+    if (!items && typeof state !== 'undefined') {
+        const index = Number.isInteger(screenIndex) ? screenIndex : state.selectedIndex;
+        const screenshot = state.screenshots[index];
+        const fallbackImage = screenshot && typeof getScreenshotImage === 'function' ? getScreenshotImage(screenshot) : screenshot?.image;
+        items = typeof getThreeDRenderItems === 'function' ? getThreeDRenderItems(screenshot, index, fallbackImage) : [];
     }
+    return renderThreeDItemsToCanvas(targetCanvas, width, height, items || []);
+}
 
-    // Clean up: remove cached model from scene and restore current model visibility
-    if (!useCurrentModel) {
-        threeScene.remove(pivotToUse);
-        if (phonePivot) {
-            phonePivot.visible = true;
-        }
+// Render the same placement stack for a side preview without changing selection.
+function renderThreeJSForScreenshot(targetCanvas, width, height, screenshotIndex, items) {
+    if (!items && typeof state !== 'undefined') {
+        const screenshot = state.screenshots[screenshotIndex];
+        const fallbackImage = screenshot && typeof getScreenshotImage === 'function' ? getScreenshotImage(screenshot) : screenshot?.image;
+        items = typeof getThreeDRenderItems === 'function' ? getThreeDRenderItems(screenshot, screenshotIndex, fallbackImage) : [];
     }
+    return renderThreeDItemsToCanvas(targetCanvas, width, height, items || []);
 }
 
 // Show/hide Three.js container
@@ -1025,6 +1093,7 @@ function showThreeJS(show) {
             updateScreenTexture();
         }
     }
+    return !show || isThreeJSRendererReady();
 }
 
 // Get Three.js canvas for export
@@ -1120,29 +1189,43 @@ function setup3DCanvasInteraction() {
 
         if (isAltDragging) {
             // Alt+drag: move position (x, y)
-            ss.x = Math.max(0, Math.min(100, ss.x + deltaX * 0.2));
-            ss.y = Math.max(0, Math.min(100, ss.y + deltaY * 0.2));
+            const position = typeof nudgeSelectedThreeDDevice === 'function'
+                ? nudgeSelectedThreeDDevice(deltaX * 0.2, deltaY * 0.2)
+                : null;
+            if (!position) {
+                ss.x = Math.max(-100, Math.min(200, ss.x + deltaX * 0.2));
+                ss.y = Math.max(-100, Math.min(200, ss.y + deltaY * 0.2));
+            }
 
             // Update sliders
-            document.getElementById('screenshot-x').value = ss.x;
-            document.getElementById('screenshot-x-value').textContent = Math.round(ss.x) + '%';
-            document.getElementById('screenshot-y').value = ss.y;
-            document.getElementById('screenshot-y-value').textContent = Math.round(ss.y) + '%';
+            const nextX = position?.x ?? ss.x;
+            const nextY = position?.y ?? ss.y;
+            document.getElementById('screenshot-x').value = nextX;
+            document.getElementById('screenshot-x-value').textContent = Math.round(nextX) + '%';
+            document.getElementById('screenshot-y').value = nextY;
+            document.getElementById('screenshot-y-value').textContent = Math.round(nextY) + '%';
         } else {
             // Regular drag: rotate
             if (!ss.rotation3D) ss.rotation3D = { x: 0, y: 0, z: 0 };
 
-            ss.rotation3D.y = Math.max(-45, Math.min(45, ss.rotation3D.y + deltaX * 0.5));
-            ss.rotation3D.x = Math.max(-45, Math.min(45, ss.rotation3D.x + deltaY * 0.5));
+            const nextY = Math.max(-45, Math.min(45, ss.rotation3D.y + deltaX * 0.5));
+            const nextX = Math.max(-45, Math.min(45, ss.rotation3D.x + deltaY * 0.5));
+            if (typeof setLinkedThreeDRotation === 'function') {
+                setLinkedThreeDRotation('y', nextY);
+                setLinkedThreeDRotation('x', nextX);
+            } else {
+                ss.rotation3D.y = nextY;
+                ss.rotation3D.x = nextX;
+            }
 
             // Update sliders
-            document.getElementById('rotation-3d-y').value = ss.rotation3D.y;
-            document.getElementById('rotation-3d-y-value').textContent = Math.round(ss.rotation3D.y) + '°';
-            document.getElementById('rotation-3d-x').value = ss.rotation3D.x;
-            document.getElementById('rotation-3d-x-value').textContent = Math.round(ss.rotation3D.x) + '°';
+            document.getElementById('rotation-3d-y').value = nextY;
+            document.getElementById('rotation-3d-y-value').textContent = Math.round(nextY) + '°';
+            document.getElementById('rotation-3d-x').value = nextX;
+            document.getElementById('rotation-3d-x-value').textContent = Math.round(nextX) + '°';
 
             // Apply rotation directly to model (fast path - skip full updateCanvas)
-            setThreeJSRotation(ss.rotation3D.x, ss.rotation3D.y, ss.rotation3D.z);
+            setThreeJSRotation(nextX, nextY, ss.rotation3D.z);
         }
 
         // Throttle updateCanvas calls using requestAnimationFrame

@@ -198,7 +198,8 @@ function captureTemplateSnapshot(indices = [state.selectedIndex]) {
                 screenshot: JSON.parse(JSON.stringify(screenshot.screenshot)),
                 text: JSON.parse(JSON.stringify(screenshot.text)),
                 elements: cloneTemplateElements(screenshot.elements),
-                devices: JSON.parse(JSON.stringify(screenshot.devices || []))
+                devices: JSON.parse(JSON.stringify(screenshot.devices || [])),
+                popouts: JSON.parse(JSON.stringify(screenshot.popouts || []))
             };
         });
     if (!screens.length) return;
@@ -241,6 +242,7 @@ function undoLastTemplate() {
         screenshot.text = snapshot.text;
         screenshot.elements = snapshot.elements;
         screenshot.devices = snapshot.devices;
+        screenshot.popouts = snapshot.popouts;
     });
     const selectedById = templateUndoSnapshot.selectedScreenshotId
         ? state.screenshots.findIndex(screenshot => screenshot.id === templateUndoSnapshot.selectedScreenshotId)
@@ -423,7 +425,6 @@ function ensureDeviceMetadata() {
             if (incoming.seamLocked === undefined) incoming.seamLocked = outgoing.seamLocked;
         });
     }
-    normalizeDeviceRenderingModes();
 }
 
 function getReusablePhotoMedia(background) {
@@ -478,10 +479,20 @@ function applyTemplateBackground(background, scene, mode) {
     return next;
 }
 
-function applyTemplateScene(screenshot, scene, targetIndex, mode, isSequence) {
+function applyTemplateScene(screenshot, scene, targetIndex, mode, isSequence, retainedThreeD = null) {
+    const previousThreeD = retainedThreeD || {
+        use3D: Boolean(screenshot.screenshot.use3D),
+        device3D: screenshot.screenshot.device3D || 'iphone',
+        frameColor: screenshot.screenshot.frameColor || null,
+        rotation3D: { ...(screenshot.screenshot.rotation3D || { x: 0, y: 0, z: 0 }) }
+    };
     screenshot.background = applyTemplateBackground(screenshot.background, scene, mode);
     const existingNonTemplateElements = (screenshot.elements || []).filter(el => !el.templateElement);
     screenshot.elements = existingNonTemplateElements.concat((scene.shapes || []).map(shape => ({ ...templateShapeToElement(shape), templateElement: true })));
+    const existingNonTemplatePopouts = (screenshot.popouts || []).filter(popout => !popout.templatePopout);
+    screenshot.popouts = existingNonTemplatePopouts.concat((scene.popouts || []).map(popout => ({
+        ...JSON.parse(JSON.stringify(popout)), id: crypto.randomUUID(), templatePopout: true
+    })));
     screenshot.devices = resolveTemplateDevices(scene.devices, targetIndex);
 
     const primaryDevice = screenshot.devices.find(device => (device.sourceOffset ?? 0) === 0) || screenshot.devices[0];
@@ -498,7 +509,25 @@ function applyTemplateScene(screenshot, scene, targetIndex, mode, isSequence) {
         delete primarySettings.continuationTextPositions;
         Object.assign(screenshot.screenshot, primarySettings);
     }
-    if (isSequence) screenshot.screenshot.use3D = false;
+    // Keep an active 3D workflow active while the user tries other templates.
+    // A template with explicit 3D art direction may
+    // still supply its own model and rotation when the editor was previously 2D.
+    const explicitlyUses3D = primaryDevice?.use3D === true;
+    const threeDAllowed = previousThreeD.allow3D !== false;
+    const templateUses3D = threeDAllowed && (Boolean(previousThreeD.use3D) || explicitlyUses3D);
+    screenshot.screenshot.use3D = templateUses3D;
+    if (templateUses3D && explicitlyUses3D && !previousThreeD.use3D) {
+        screenshot.screenshot.device3D = primaryDevice.device3D || 'iphone';
+        screenshot.screenshot.frameColor = primaryDevice.frameColor || null;
+        screenshot.screenshot.rotation3D = { ...(primaryDevice.rotation3D || { x: 0, y: 0, z: 0 }) };
+    } else if (templateUses3D) {
+        const deviceType = getValidThreeDDeviceType(previousThreeD.device3D);
+        screenshot.screenshot.device3D = deviceType;
+        screenshot.screenshot.frameColor = getValidFrameColor(deviceType, previousThreeD.frameColor);
+        screenshot.screenshot.rotation3D = { ...(previousThreeD.rotation3D || { x: 0, y: 0, z: 0 }) };
+    } else {
+        screenshot.screenshot.rotation3D = { x: 0, y: 0, z: 0 };
+    }
 
     const preservedHeadlines = screenshot.text.headlines;
     const preservedSubheadlines = screenshot.text.subheadlines;
@@ -553,8 +582,24 @@ function applyTemplate(templateId, mode = 'all') {
     ])];
     captureTemplateSnapshot(snapshotIndices);
     detachExternalDeviceReferences(targetIndices);
+    const startingScreenshot = state.screenshots[startIndex];
+    const allow3D = !isCloudDocumentContext();
+    const retainedThreeD = {
+        allow3D,
+        use3D: allow3D && Boolean(startingScreenshot?.screenshot?.use3D),
+        device3D: startingScreenshot?.screenshot?.device3D || 'iphone',
+        frameColor: startingScreenshot?.screenshot?.frameColor || null,
+        rotation3D: { ...(startingScreenshot?.screenshot?.rotation3D || { x: 0, y: 0, z: 0 }) }
+    };
     scenes.forEach((scene, offset) => {
-        applyTemplateScene(state.screenshots[startIndex + offset], scene, startIndex + offset, mode, template.type === 'sequence');
+        applyTemplateScene(
+            state.screenshots[startIndex + offset],
+            scene,
+            startIndex + offset,
+            mode,
+            template.type === 'sequence',
+            retainedThreeD
+        );
     });
     ensureDeviceMetadata();
 
@@ -866,6 +911,29 @@ function drawTemplateDevicePlaceholder(context, dims, device, detailed = false, 
     context.restore();
 }
 
+function createTemplateDetailPlaceholder() {
+    const source = document.createElement('canvas');
+    source.width = 240; source.height = 520;
+    const context = source.getContext('2d');
+    context.fillStyle = '#FAFAFA'; context.fillRect(0, 0, source.width, source.height);
+    context.fillStyle = '#252629';
+    context.beginPath(); context.roundRect(88, 9, 64, 12, 6); context.fill();
+    context.fillStyle = '#D7D8DA';
+    context.beginPath(); context.roundRect(20, 43, 130, 10, 5); context.fill();
+    for (let row = 0; row < 6; row++) {
+        const y = 79 + row * 70;
+        context.fillStyle = '#ECEDEE';
+        context.beginPath(); context.roundRect(15, y, 210, 58, 9); context.fill();
+        context.fillStyle = '#C0C9C6';
+        context.beginPath(); context.roundRect(27, y + 12, 34, 34, 8); context.fill();
+        context.fillStyle = '#C8CACC';
+        context.beginPath(); context.roundRect(73, y + 15, 111, 7, 3); context.fill();
+        context.fillStyle = '#D6D8D9';
+        context.beginPath(); context.roundRect(73, y + 32, 84, 6, 3); context.fill();
+    }
+    return source;
+}
+
 function renderTemplateThumbnail(template, element) {
     const templateScenes = getTemplateScenes(template);
     const scenes = templateScenes.length > 3
@@ -900,6 +968,9 @@ function renderTemplateThumbnail(template, element) {
             Boolean(scene.previewDevices),
             isSequence ? 0.82 : 0.48
         ));
+        if (scene.popouts?.length) {
+            drawPopoutsToContext(cctx, dims, scene.popouts, createTemplateDetailPlaceholder(), {});
+        }
         drawTemplatePreviewCopy(cctx, dims, scene);
         cctx.restore();
     });
@@ -911,7 +982,7 @@ function openTemplateGallery() {
     templateGalleryReturnFocus = document.activeElement;
     const overlay = document.createElement('div');
     overlay.id = 'template-gallery-overlay'; overlay.className = 'modal-overlay visible';
-    const supportedScreenCounts = [1, 3, 6];
+    const supportedScreenCounts = [1, 2, 3, 6];
     const templatesByScreenCount = new Map(supportedScreenCounts.map(screenCount => [
         screenCount,
         APP_TEMPLATES.filter(template => getTemplateScenes(template).length === screenCount)
@@ -935,6 +1006,7 @@ function openTemplateGallery() {
     };
     const sectionDetails = {
         1: ['One-screen looks', 'A complete art direction for one focused screenshot.'],
+        2: ['Two-screen showcases', 'A connected pair with a clean ending on screen two.'],
         3: ['Three-screen stories', 'A concise connected story with a clean ending on screen three.'],
         6: ['Six-screen campaigns', 'A complete feature narrative that resolves on screen six.']
     };
@@ -948,7 +1020,7 @@ function openTemplateGallery() {
     }).join('');
     overlay.innerHTML = `<div class="modal template-gallery" role="dialog" aria-modal="true" aria-labelledby="template-gallery-title" aria-describedby="template-gallery-description">
         <div class="template-gallery-chrome">
-            <div class="template-gallery-header"><div><h2 id="template-gallery-title">Choose a template</h2><p id="template-gallery-description">Choose an exact one-, three-, or six-screen art direction while keeping your screenshots and copy.</p></div><button type="button" class="modal-close" data-close aria-label="Close template gallery">&times;</button></div>
+            <div class="template-gallery-header"><div><h2 id="template-gallery-title">Choose a template</h2><p id="template-gallery-description">Choose an exact one-, two-, three-, or six-screen art direction while keeping your screenshots and copy.</p></div><button type="button" class="modal-close" data-close aria-label="Close template gallery">&times;</button></div>
             <div class="template-mode" role="group" aria-label="Application mode"><label><input type="radio" name="template-mode" value="all" checked> Colors + layout</label><label><input type="radio" name="template-mode" value="layout"> Layout only</label><label><input type="radio" name="template-mode" value="replace"> Replace everything</label></div>
         </div>
         <div class="template-gallery-scroll">${templateSections}</div>
@@ -1639,21 +1711,75 @@ function getLinkedDeviceScreens(originScreenshot) {
     return state.screenshots.filter(screenshot => visited.has(screenshot.id));
 }
 
-function deviceLayoutRequires2D(screenshot, screenIndex = state.screenshots.indexOf(screenshot)) {
+function hasComposedDeviceLayout(screenshot, screenIndex = state.screenshots.indexOf(screenshot)) {
     const devices = screenshot?.devices || [];
     return devices.length > 1
-        || devices.some(device => device.hidden === true)
         || getLinkedDeviceScreens(screenshot).length > 1
         || devices.some(device => device.placementLinkId
             || getDeviceSourceIndex(screenIndex, device) !== screenIndex);
 }
 
-function normalizeDeviceRenderingModes() {
-    state.screenshots.forEach((screenshot, screenIndex) => {
-        if (screenshot?.screenshot?.use3D && deviceLayoutRequires2D(screenshot, screenIndex)) {
-            screenshot.screenshot.use3D = false;
-        }
+function getDefaultFrameColor(deviceType = 'iphone') {
+    const presets = typeof frameColorPresets !== 'undefined' ? frameColorPresets[deviceType] : null;
+    return presets?.[0]?.id || null;
+}
+
+function getValidThreeDDeviceType(deviceType) {
+    return deviceType === 'samsung' ? 'samsung' : 'iphone';
+}
+
+function getValidFrameColor(deviceType = 'iphone', colorId) {
+    const presets = typeof frameColorPresets !== 'undefined' ? frameColorPresets[deviceType] : null;
+    return presets?.some(preset => preset.id === colorId) ? colorId : getDefaultFrameColor(deviceType);
+}
+
+function getThreeDSettingTargets(screenshot = getCurrentScreenshot()) {
+    if (!screenshot) return [];
+    const linked = getLinkedDeviceScreens(screenshot);
+    return linked.length ? linked : [screenshot];
+}
+
+function setLinkedThreeDSetting(key, value, screenshot = getCurrentScreenshot()) {
+    getThreeDSettingTargets(screenshot).forEach(target => {
+        setObjectPath(target.screenshot, key, typeof value === 'object' && value !== null
+            ? JSON.parse(JSON.stringify(value))
+            : value);
     });
+}
+
+function setLinkedThreeDRotation(axis, value) {
+    getThreeDSettingTargets().forEach(target => {
+        if (!target.screenshot.rotation3D) target.screenshot.rotation3D = { x: 0, y: 0, z: 0 };
+        target.screenshot.rotation3D[axis] = value;
+    });
+}
+
+function nudgeSelectedThreeDDevice(deltaX, deltaY) {
+    const selected = getSelectedDeviceContext();
+    if (!selected) return null;
+    const x = Math.max(-100, Math.min(200, getPlacementControlValue(selected.device, 'x') + deltaX));
+    const y = Math.max(-100, Math.min(200, getPlacementControlValue(selected.device, 'y') + deltaY));
+    setSelectedDeviceSetting('x', x);
+    setSelectedDeviceSetting('y', y);
+    return { x, y };
+}
+
+function setDeviceRenderMode(use3D) {
+    const screenshot = getCurrentScreenshot();
+    if (!screenshot || (use3D && isCloudDocumentContext())) return false;
+    const targets = getThreeDSettingTargets(screenshot);
+    const deviceType = getValidThreeDDeviceType(screenshot.screenshot.device3D);
+    const frameColor = getValidFrameColor(deviceType, screenshot.screenshot.frameColor);
+    const rotation3D = {
+        ...(screenshot.screenshot.rotation3D || { x: 0, y: 0, z: 0 })
+    };
+    targets.forEach(target => {
+        target.screenshot.use3D = use3D;
+        target.screenshot.device3D = deviceType;
+        target.screenshot.frameColor = frameColor;
+        target.screenshot.rotation3D = { ...rotation3D };
+    });
+    return true;
 }
 
 function setScreenshotSetting(key, value) {
@@ -1669,11 +1795,49 @@ function getDeviceRenderSettings(settings, device) {
     return {
         ...settings,
         ...device,
-        // Border, shadow, and radius belong to the linked composition, not an individual placement.
+        // Appearance and 3D choices belong to the screenshot/linked composition,
+        // not an individual placement. Templates such as Pulse may retain their
+        // original 3D defaults on the device geometry, so the current editor
+        // selection must win after the placement is merged.
         frame: settings.frame,
         shadow: settings.shadow,
-        cornerRadius: settings.cornerRadius
+        cornerRadius: settings.cornerRadius,
+        use3D: settings.use3D,
+        device3D: getValidThreeDDeviceType(settings.device3D),
+        frameColor: settings.frameColor,
+        rotation3D: settings.rotation3D
     };
+}
+
+function getThreeDItemViewport(screenIndex, device) {
+    if (!device?.placementLinkId) return { screenIndex: 0, screenCount: 1 };
+    const sourceIndex = getDeviceSourceIndex(screenIndex, device);
+    const isIncoming = sourceIndex >= 0
+        ? sourceIndex < screenIndex
+        : Number(device.sourceOffset) < 0;
+    return { screenIndex: isIncoming ? 1 : 0, screenCount: 2 };
+}
+
+function getThreeDRenderItems(screenshot, screenIndex, fallbackImage = null) {
+    if (!screenshot) return [];
+    const settings = screenshot.screenshot || {};
+    const devices = screenshot.devices || [];
+    if (!devices.length) {
+        const image = fallbackImage || getScreenshotImage(screenshot);
+        return image ? [{
+            image,
+            settings: { ...settings },
+            viewport: { screenIndex: 0, screenCount: 1 }
+        }] : [];
+    }
+    return devices
+        .filter(device => device.hidden !== true)
+        .map(device => ({
+            image: getDeviceSourceImage(screenIndex, device, fallbackImage || getScreenshotImage(screenshot)),
+            settings: getDeviceRenderSettings(settings, device),
+            viewport: getThreeDItemViewport(screenIndex, device)
+        }))
+        .filter(item => item.image);
 }
 
 function getDeviceSourceIndex(screenshotIndex, device) {
@@ -1777,16 +1941,6 @@ function setSelectedDeviceSetting(key, value) {
         setScreenshotSetting(key, value);
         return;
     }
-    if (selected.screenshot.screenshot.use3D) {
-        setScreenshotSetting(key, value);
-        // A single 2D placement and its 3D counterpart share layout controls.
-        if ((selected.screenshot.devices || []).length === 1
-            && isCurrentScreenshotDevice(selected.screenshot, selected.device)) {
-            setPlacementControlValue(selected.device, key, value);
-            syncPrimaryDeviceSettings(selected.screenshot, selected.device);
-        }
-        return;
-    }
 
     const linked = selected.device.placementLinkId && selected.device.seamLocked !== false
         ? getPlacementLinkContexts(selected.device.placementLinkId)
@@ -1884,9 +2038,7 @@ function escapeInspectorText(value) {
 
 function syncDevicePlacementControls(context = getSelectedDeviceContext()) {
     if (!context) return;
-    const placement = context.screenshot.screenshot.use3D
-        ? context.screenshot.screenshot
-        : context.device;
+    const placement = context.device;
     const values = {
         scale: getPlacementControlValue(placement, 'scale'),
         x: getPlacementControlValue(placement, 'x'),
@@ -2030,18 +2182,29 @@ function updateDeviceEditorUI(context = getSelectedDeviceContext()) {
             ? `All devices · ${devices.length}`
             : 'This screen';
 
-    const hasLinkedLayout = deviceLayoutRequires2D(screenshot, state.selectedIndex);
+    const hasComposedLayout = hasComposedDeviceLayout(screenshot, state.selectedIndex);
+    const cloudBlocks3D = isCloudDocumentContext();
     const threeDButton = document.querySelector('#device-type-selector button[data-type="3d"]');
     if (threeDButton) {
-        threeDButton.disabled = hasLinkedLayout;
-        threeDButton.title = hasLinkedLayout
-            ? devices.some(device => device.hidden === true)
-                ? 'Show the hidden device before switching to 3D'
-                : 'Linked and multi-device layouts use 2D rendering'
-            : 'Use a 3D device model';
+        threeDButton.disabled = cloudBlocks3D;
+        threeDButton.title = cloudBlocks3D
+            ? 'Hosted projects currently export 2D devices only'
+            : hasComposedLayout
+                ? 'Render every template device as an aligned 3D model'
+                : 'Use a 3D device model';
+        if (cloudBlocks3D || hasComposedLayout) threeDButton.setAttribute('aria-describedby', 'linked-3d-tip');
+        else threeDButton.removeAttribute('aria-describedby');
     }
     const linkedTip = document.getElementById('linked-3d-tip');
-    if (linkedTip) linkedTip.style.display = hasLinkedLayout ? 'flex' : 'none';
+    if (linkedTip) {
+        linkedTip.style.display = cloudBlocks3D || hasComposedLayout ? 'flex' : 'none';
+        const title = linkedTip.querySelector('strong');
+        const detail = linkedTip.querySelector('span');
+        if (title) title.textContent = cloudBlocks3D ? '3D is local-editor only' : 'Template-aware 3D';
+        if (detail) detail.textContent = cloudBlocks3D
+            ? 'Hosted projects currently use the 2D renderer for reliable cloud exports.'
+            : 'Every visible device keeps its source, layer order, and connected-screen alignment.';
+    }
 }
 
 function refreshDeviceEditor() {
@@ -2208,10 +2371,10 @@ const languageFlags = {
     'uk': '🇺🇦'
 };
 
-// Google Fonts configuration
+// Curated web fonts and the existing Google Fonts catalog share one loader.
 const googleFonts = {
-    loaded: new Set(),
-    loading: new Set(),
+    loaded: AppScreenFontLibrary.loaded,
+    loading: AppScreenFontLibrary.loading,
     // Popular fonts that are commonly used for marketing/app store
     popular: [
         'Inter', 'Poppins', 'Roboto', 'Open Sans', 'Montserrat', 'Lato', 'Raleway',
@@ -2252,66 +2415,13 @@ const googleFonts = {
     allFonts: null
 };
 
-// Load a Google Font dynamically
+// Keep the legacy entry point for saved projects and existing picker callers.
 async function loadGoogleFont(fontName) {
-    // Check if it's a system font
-    const isSystem = googleFonts.system.some(f => f.name === fontName);
-    if (isSystem) return;
-
-    // If already loaded, just ensure the current weight is available
-    if (googleFonts.loaded.has(fontName)) {
-        const text = getTextSettings();
-        const weight = text.headlineWeight || '600';
-        try {
-            await document.fonts.load(`${weight} 16px "${fontName}"`);
-        } catch (e) {
-            // Font already loaded, weight might not exist but that's ok
-        }
-        return;
-    }
-
-    // If currently loading, wait for it
-    if (googleFonts.loading.has(fontName)) {
-        // Wait a bit and check again
-        await new Promise(resolve => setTimeout(resolve, 100));
-        if (googleFonts.loading.has(fontName)) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        return;
-    }
-
-    googleFonts.loading.add(fontName);
-
-    try {
-        const link = document.createElement('link');
-        link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(fontName)}:wght@300;400;500;600;700;800;900&display=swap`;
-        link.rel = 'stylesheet';
-
-        // Wait for stylesheet to load first
-        await new Promise((resolve, reject) => {
-            link.onload = resolve;
-            link.onerror = reject;
-            document.head.appendChild(link);
-        });
-
-        // Wait for the font to actually load with the required weights
-        const text = getTextSettings();
-        const headlineWeight = text.headlineWeight || '600';
-        const subheadlineWeight = text.subheadlineWeight || '400';
-
-        // Load all weights we might need
-        await Promise.all([
-            document.fonts.load(`400 16px "${fontName}"`),
-            document.fonts.load(`${headlineWeight} 16px "${fontName}"`),
-            document.fonts.load(`${subheadlineWeight} 16px "${fontName}"`)
-        ]);
-
-        googleFonts.loaded.add(fontName);
-        googleFonts.loading.delete(fontName);
-    } catch (error) {
-        console.warn(`Failed to load font: ${fontName}`, error);
-        googleFonts.loading.delete(fontName);
-    }
+    if (googleFonts.system.some(font => font.name === fontName)) return true;
+    const text = getTextSettings();
+    return AppScreenFontLibrary.loadFont(fontName, {
+        weights: [400, text.headlineWeight || 600, text.subheadlineWeight || 400]
+    });
 }
 
 // Fetch all Google Fonts from the API (cached)
@@ -2562,9 +2672,9 @@ async function fetchAllGoogleFonts() {
 
 // Font picker state - separate state for each picker
 const fontPickerState = {
-    headline: { category: 'popular', search: '' },
-    subheadline: { category: 'popular', search: '' },
-    element: { category: 'popular', search: '' }
+    headline: { category: 'fancy', search: '' },
+    subheadline: { category: 'fancy', search: '' },
+    element: { category: 'fancy', search: '' }
 };
 
 // Initialize all font pickers
@@ -2613,15 +2723,21 @@ function initSingleFontPicker(pickerId, ids) {
     const picker = document.getElementById(ids.picker);
 
     if (!trigger || !dropdown) return;
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-controls', ids.dropdown);
 
     // Toggle dropdown
     trigger.addEventListener('click', (e) => {
         e.stopPropagation();
         // Close other font picker dropdowns
         document.querySelectorAll('.font-picker-dropdown.open').forEach(d => {
-            if (d.id !== ids.dropdown) d.classList.remove('open');
+            if (d.id !== ids.dropdown) {
+                d.classList.remove('open');
+                d.closest('.font-picker')?.querySelector('.font-picker-trigger')?.setAttribute('aria-expanded', 'false');
+            }
         });
         dropdown.classList.toggle('open');
+        trigger.setAttribute('aria-expanded', String(dropdown.classList.contains('open')));
         if (dropdown.classList.contains('open')) {
             searchInput.focus();
             renderFontList(pickerId, ids);
@@ -2632,6 +2748,7 @@ function initSingleFontPicker(pickerId, ids) {
     document.addEventListener('click', (e) => {
         if (!e.target.closest(`#${ids.picker}`)) {
             dropdown.classList.remove('open');
+            trigger.setAttribute('aria-expanded', 'false');
         }
     });
 
@@ -2644,6 +2761,12 @@ function initSingleFontPicker(pickerId, ids) {
     // Prevent dropdown close when clicking inside
     dropdown.addEventListener('click', (e) => {
         e.stopPropagation();
+    });
+    picker.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && dropdown.classList.contains('open')) {
+            event.stopPropagation(); dropdown.classList.remove('open');
+            trigger.setAttribute('aria-expanded', 'false'); trigger.focus();
+        }
     });
 
     // Category buttons
@@ -2667,21 +2790,25 @@ async function renderFontList(pickerId, ids) {
     if (!fontList) return;
 
     const pickerState = fontPickerState[pickerId];
+    const renderId = pickerState.renderId = (pickerState.renderId || 0) + 1;
+    fontList.previewObserver?.disconnect();
     let fonts = [];
     const currentFont = ids.getFont ? ids.getFont() : getTextSettings()[ids.stateKey];
 
-    if (pickerState.category === 'system') {
+    const webFontOption = name => {
+        const font = AppScreenFontLibrary.getFont(name);
+        return font && { ...font, category: font.provider };
+    };
+    if (pickerState.category === 'fancy') {
+        fonts = AppScreenFontLibrary.fonts.filter(font => font.fancy).map(font => webFontOption(font.name));
+    } else if (pickerState.category === 'system') {
         fonts = googleFonts.system.map(f => ({
             name: f.name,
             value: f.value,
             category: 'system'
         }));
     } else if (pickerState.category === 'popular') {
-        fonts = googleFonts.popular.map(name => ({
-            name,
-            value: `'${name}', sans-serif`,
-            category: 'google'
-        }));
+        fonts = googleFonts.popular.map(webFontOption);
     } else {
         // All fonts
         const allFonts = await fetchAllGoogleFonts();
@@ -2691,17 +2818,16 @@ async function renderFontList(pickerId, ids) {
                 value: f.value,
                 category: 'system'
             })),
-            ...allFonts.map(name => ({
-                name,
-                value: `'${name}', sans-serif`,
-                category: 'google'
-            }))
+            ...AppScreenFontLibrary.fonts.map(font => webFontOption(font.name)),
+            ...allFonts.map(webFontOption)
         ];
     }
+    if (pickerState.renderId !== renderId) return;
+    fonts = [...new Map(fonts.filter(Boolean).map(font => [font.name, font])).values()];
 
     // Filter by search
     if (pickerState.search) {
-        fonts = fonts.filter(f => f.name.toLowerCase().includes(pickerState.search));
+        fonts = fonts.filter(font => `${font.name} ${font.style || ''} ${font.category}`.toLowerCase().includes(pickerState.search));
     }
 
     // Limit to prevent performance issues
@@ -2712,39 +2838,70 @@ async function renderFontList(pickerId, ids) {
         return;
     }
 
+    const providerLabel = provider => ({ google: 'Google Fonts', fontlibrary: 'Font Library', fontshare: 'Fontshare', system: 'System' })[provider] || provider;
+    const escapeHtml = value => String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+    const currentFamily = currentFont?.split(',')[0].replace(/['"]/g, '').trim();
     fontList.innerHTML = displayFonts.map(font => {
-        const isSelected = currentFont && (currentFont.includes(font.name) || currentFont === font.value);
+        const isSelected = currentFont === font.value || currentFamily === (font.cssFamily || font.name);
         const isLoaded = font.category === 'system' || googleFonts.loaded.has(font.name);
         const isLoading = googleFonts.loading.has(font.name);
 
         return `
-            <div class="font-option ${isSelected ? 'selected' : ''}"
-                 data-font-name="${font.name}"
-                 data-font-value="${font.value}"
-                 data-font-category="${font.category}">
-                <span class="font-option-name" style="font-family: ${isLoaded ? font.value : 'inherit'}">${font.name}</span>
-                ${isLoading ? '<span class="font-option-loading">Loading...</span>' :
-                `<span class="font-option-category">${font.category}</span>`}
-            </div>
+            <button type="button" class="font-option ${font.fancy ? 'font-option-fancy' : ''} ${isSelected ? 'selected' : ''}"
+                 aria-pressed="${Boolean(isSelected)}"
+                 data-font-name="${escapeHtml(font.name)}"
+                 data-font-value="${escapeHtml(font.value)}"
+                 data-font-category="${escapeHtml(font.category)}">
+                <span class="font-option-copy"><span class="font-option-name" style="font-family: ${escapeHtml(isLoaded ? font.value : 'inherit')}">${escapeHtml(font.name)}</span>
+                ${font.fancy && font.style ? `<span class="font-option-style">${escapeHtml(font.style)}</span>` : ''}</span>
+                <span class="font-option-category ${isLoading ? 'font-option-loading' : ''}">${isLoading ? 'Loading…' : escapeHtml(providerLabel(font.category))}</span>
+            </button>
         `;
     }).join('');
 
+    const previewFont = async option => {
+        if (option.dataset.fontCategory === 'system') return true;
+        const loaded = await loadGoogleFont(option.dataset.fontName);
+        if (option.isConnected) {
+            if (loaded) option.querySelector('.font-option-name').style.fontFamily = option.dataset.fontValue;
+            const status = option.querySelector('.font-option-category');
+            status.textContent = loaded ? providerLabel(option.dataset.fontCategory) : 'Retry';
+            status.classList.remove('font-option-loading');
+        }
+        return loaded;
+    };
     // Add click handlers
     fontList.querySelectorAll('.font-option').forEach(option => {
         option.addEventListener('click', async () => {
+            const selectionId = pickerState.selectionId = (pickerState.selectionId || 0) + 1;
+            const targetScreenshotId = getCurrentScreenshot()?.id;
+            const targetElementId = selectedElementId;
             const fontName = option.dataset.fontName;
             const fontValue = option.dataset.fontValue;
             const fontCategory = option.dataset.fontCategory;
 
-            // Load Google Font if needed
-            if (fontCategory === 'google') {
-                option.querySelector('.font-option-category').textContent = 'Loading...';
-                option.querySelector('.font-option-category').classList.add('font-option-loading');
-                await loadGoogleFont(fontName);
-                option.querySelector('.font-option-name').style.fontFamily = fontValue;
-                option.querySelector('.font-option-category').textContent = 'google';
-                option.querySelector('.font-option-category').classList.remove('font-option-loading');
+            if (fontCategory !== 'system') {
+                const status = option.querySelector('.font-option-category');
+                status.textContent = 'Loading…';
+                status.classList.add('font-option-loading');
+                const loaded = await previewFont(option);
+                if (pickerState.selectionId !== selectionId || !option.isConnected) return;
+                status.textContent = loaded ? providerLabel(fontCategory) : 'Retry';
+                status.classList.remove('font-option-loading');
+                if (!loaded) {
+                    let error = fontList.querySelector('.font-picker-error');
+                    if (!error) {
+                        error = document.createElement('div'); error.className = 'font-picker-error';
+                        error.setAttribute('role', 'alert'); fontList.prepend(error);
+                    }
+                    error.textContent = `${fontName} could not load. Check your connection and try again. Your font is unchanged.`;
+                    return;
+                }
             }
+            if (pickerState.selectionId !== selectionId || !option.isConnected
+                || targetScreenshotId !== getCurrentScreenshot()?.id
+                || (ids.setFont && targetElementId !== selectedElementId)
+                || !document.getElementById(ids.dropdown).classList.contains('open')) return;
 
             // Update state
             document.getElementById(ids.hidden).value = fontValue;
@@ -2760,11 +2917,15 @@ async function renderFontList(pickerId, ids) {
             preview.style.fontFamily = fontValue;
 
             // Update selection in list
-            fontList.querySelectorAll('.font-option').forEach(opt => opt.classList.remove('selected'));
+            fontList.querySelectorAll('.font-option').forEach(opt => {
+                opt.classList.remove('selected'); opt.setAttribute('aria-pressed', 'false');
+            });
             option.classList.add('selected');
+            option.setAttribute('aria-pressed', 'true');
 
             // Close dropdown
             document.getElementById(ids.dropdown).classList.remove('open');
+            document.getElementById(ids.trigger).setAttribute('aria-expanded', 'false');
 
             updateCanvas();
         });
@@ -2773,13 +2934,24 @@ async function renderFontList(pickerId, ids) {
         option.addEventListener('mouseenter', () => {
             const fontName = option.dataset.fontName;
             const fontCategory = option.dataset.fontCategory;
-            if (fontCategory === 'google' && !googleFonts.loaded.has(fontName)) {
-                loadGoogleFont(fontName).then(() => {
-                    option.querySelector('.font-option-name').style.fontFamily = option.dataset.fontValue;
-                });
-            }
+            if (fontCategory !== 'system' && !googleFonts.loaded.has(fontName)) previewFont(option);
         });
+        option.addEventListener('focus', () => previewFont(option));
     });
+
+    // Only fetch visible curated previews, never the whole catalog at startup.
+    if (pickerState.category === 'fancy' && document.getElementById(ids.dropdown).classList.contains('open')) {
+        if ('IntersectionObserver' in window) {
+            fontList.previewObserver = new IntersectionObserver(entries => {
+                for (const entry of entries) if (entry.isIntersecting) {
+                    previewFont(entry.target); fontList.previewObserver.unobserve(entry.target);
+                }
+            }, { root: fontList });
+            fontList.querySelectorAll('.font-option').forEach(option => fontList.previewObserver.observe(option));
+        } else {
+            [...fontList.querySelectorAll('.font-option')].slice(0, 5).forEach(previewFont);
+        }
+    }
 }
 
 // Update font picker preview from state
@@ -2814,11 +2986,13 @@ function updateSingleFontPickerPreview(hiddenId, previewId, stateKey) {
         fontName = systemFont.name;
     } else {
         // Try to extract from Google Font value like "'Roboto', sans-serif"
-        const match = fontValue.match(/'([^']+)'/);
-        if (match) {
-            fontName = match[1];
-            // Load the font if it's a Google Font
-            if (!isCloudDocumentContext()) loadGoogleFont(fontName);
+        const family = fontValue.split(',')[0].trim().replace(/^['"]|['"]$/g, '');
+        if (family) {
+            fontName = AppScreenFontLibrary.getFont(family)?.name || family;
+            if (!isCloudDocumentContext()) {
+                const wasLoaded = googleFonts.loaded.has(fontName);
+                loadGoogleFont(fontName).then(loaded => { if (loaded && !wasLoaded) updateCanvas(); });
+            }
         }
     }
 
@@ -2841,10 +3015,13 @@ function updateElementFontPickerPreview(el) {
     if (systemFont) {
         fontName = systemFont.name;
     } else {
-        const match = fontValue.match(/'([^']+)'/);
-        if (match) {
-            fontName = match[1];
-            if (!isCloudDocumentContext()) loadGoogleFont(fontName);
+        const family = fontValue.split(',')[0].trim().replace(/^['"]|['"]$/g, '');
+        if (family) {
+            fontName = AppScreenFontLibrary.getFont(family)?.name || family;
+            if (!isCloudDocumentContext()) {
+                const wasLoaded = googleFonts.loaded.has(fontName);
+                loadGoogleFont(fontName).then(loaded => { if (loaded && !wasLoaded) updateCanvas(); });
+            }
         }
     }
 
@@ -4089,22 +4266,26 @@ function updateFrameColorSwatches(deviceType, activeColorId) {
     }
 
     // Default to first preset if none specified
-    if (!activeColorId) activeColorId = presets[0].id;
+    activeColorId = getValidFrameColor(deviceType, activeColorId);
 
     container.innerHTML = presets.map(p =>
-        `<div class="frame-color-swatch${p.id === activeColorId ? ' active' : ''}" ` +
-        `data-color-id="${p.id}" title="${p.label}" ` +
-        `style="background: ${p.swatch}"></div>`
+        `<button type="button" class="frame-color-swatch${p.id === activeColorId ? ' active' : ''}" ` +
+        `data-color-id="${p.id}" title="${p.label}" aria-label="${p.label}" ` +
+        `aria-pressed="${p.id === activeColorId}" style="background: ${p.swatch}"></button>`
     ).join('');
 
     // Attach click handlers
     container.querySelectorAll('.frame-color-swatch').forEach(swatch => {
         swatch.addEventListener('click', () => {
             const colorId = swatch.dataset.colorId;
-            container.querySelectorAll('.frame-color-swatch').forEach(s => s.classList.remove('active'));
+            container.querySelectorAll('.frame-color-swatch').forEach(s => {
+                s.classList.remove('active');
+                s.setAttribute('aria-pressed', 'false');
+            });
             swatch.classList.add('active');
+            swatch.setAttribute('aria-pressed', 'true');
 
-            setScreenshotSetting('frameColor', colorId);
+            setLinkedThreeDSetting('frameColor', colorId);
 
             if (typeof setPhoneFrameColor === 'function') {
                 setPhoneFrameColor(colorId, deviceType);
@@ -4211,14 +4392,6 @@ function syncUIWithState() {
     customInputs.classList.toggle('visible', state.outputDevice === 'custom');
     document.getElementById('custom-width').value = state.customWidth;
     document.getElementById('custom-height').value = state.customHeight;
-
-    // Persisted projects from older versions can contain a linked layout marked as 3D.
-    // Linked and multi-device compositions render in 2D so every placement stays visible.
-    const currentScreenshot = getCurrentScreenshot();
-    if (currentScreenshot?.screenshot?.use3D
-        && deviceLayoutRequires2D(currentScreenshot, state.selectedIndex)) {
-        currentScreenshot.screenshot.use3D = false;
-    }
 
     // Get current screenshot's settings
     const bg = getBackground();
@@ -4358,10 +4531,14 @@ function syncUIWithState() {
     const device3D = ss.device3D || 'iphone';
     const rotation3D = ss.rotation3D || { x: 0, y: 0, z: 0 };
     document.querySelectorAll('#device-type-selector button').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.type === (use3D ? '3d' : '2d'));
+        const active = btn.dataset.type === (use3D ? '3d' : '2d');
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', String(active));
     });
     document.querySelectorAll('#device-3d-selector button').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.model === device3D);
+        const active = btn.dataset.model === device3D;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', String(active));
     });
     updateFrameColorSwatches(device3D, ss.frameColor);
     document.getElementById('rotation-3d-options').style.display = use3D ? 'block' : 'none';
@@ -6951,30 +7128,8 @@ function setupEventListeners() {
     document.querySelectorAll('#device-type-selector button').forEach(btn => {
         btn.addEventListener('click', () => {
             const use3D = btn.dataset.type === '3d';
-            const screenshot = getCurrentScreenshot();
-            if (use3D && deviceLayoutRequires2D(screenshot, state.selectedIndex)) return;
-
-            document.querySelectorAll('#device-type-selector button').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-
-            setScreenshotSetting('use3D', use3D);
-            document.getElementById('rotation-3d-options').style.display = use3D ? 'block' : 'none';
-
-            // Hide 2D-only settings in 3D mode, show 3D tip
-            document.getElementById('2d-only-settings').style.display = use3D ? 'none' : 'block';
-            document.getElementById('position-presets-section').style.display = use3D ? 'none' : 'block';
-            document.getElementById('frame-color-section').style.display = use3D ? 'block' : 'none';
-            document.getElementById('3d-tip').style.display = use3D ? 'flex' : 'none';
-
-            if (typeof showThreeJS === 'function') {
-                showThreeJS(use3D);
-            }
-
-            if (use3D && typeof updateScreenTexture === 'function') {
-                updateScreenTexture();
-            }
-
-            refreshDeviceEditor();
+            if (!setDeviceRenderMode(use3D)) return;
+            syncUIWithState();
             updateCanvas();
         });
     });
@@ -6986,21 +7141,21 @@ function setupEventListeners() {
             btn.classList.add('active');
 
             const device3D = btn.dataset.model;
-            setScreenshotSetting('device3D', device3D);
+            setLinkedThreeDSetting('device3D', device3D);
 
             // Reset frame color to first preset for new device
-            const presets = typeof frameColorPresets !== 'undefined' ? frameColorPresets[device3D] : null;
-            const defaultColor = presets ? presets[0].id : null;
-            setScreenshotSetting('frameColor', defaultColor);
+            const defaultColor = getDefaultFrameColor(device3D);
+            setLinkedThreeDSetting('frameColor', defaultColor);
             updateFrameColorSwatches(device3D, defaultColor);
 
             if (typeof switchPhoneModel === 'function') {
                 switchPhoneModel(device3D);
             }
 
-            // Apply default frame color after model switch
+            // If the model was already ready, update its hidden interactive copy
+            // immediately. Newly loaded models read the same state in their load callback.
             if (defaultColor && typeof setPhoneFrameColor === 'function') {
-                setTimeout(() => setPhoneFrameColor(defaultColor, device3D), 100);
+                setPhoneFrameColor(defaultColor, device3D);
             }
 
             updateCanvas();
@@ -7009,9 +7164,9 @@ function setupEventListeners() {
 
     // 3D rotation controls
     document.getElementById('rotation-3d-x').addEventListener('input', (e) => {
+        const value = parseInt(e.target.value);
+        setLinkedThreeDRotation('x', value);
         const ss = getScreenshotSettings();
-        if (!ss.rotation3D) ss.rotation3D = { x: 0, y: 0, z: 0 };
-        ss.rotation3D.x = parseInt(e.target.value);
         document.getElementById('rotation-3d-x-value').textContent = formatValue(e.target.value) + '°';
         if (typeof setThreeJSRotation === 'function') {
             setThreeJSRotation(ss.rotation3D.x, ss.rotation3D.y, ss.rotation3D.z);
@@ -7020,9 +7175,9 @@ function setupEventListeners() {
     });
 
     document.getElementById('rotation-3d-y').addEventListener('input', (e) => {
+        const value = parseInt(e.target.value);
+        setLinkedThreeDRotation('y', value);
         const ss = getScreenshotSettings();
-        if (!ss.rotation3D) ss.rotation3D = { x: 0, y: 0, z: 0 };
-        ss.rotation3D.y = parseInt(e.target.value);
         document.getElementById('rotation-3d-y-value').textContent = formatValue(e.target.value) + '°';
         if (typeof setThreeJSRotation === 'function') {
             setThreeJSRotation(ss.rotation3D.x, ss.rotation3D.y, ss.rotation3D.z);
@@ -7031,9 +7186,9 @@ function setupEventListeners() {
     });
 
     document.getElementById('rotation-3d-z').addEventListener('input', (e) => {
+        const value = parseInt(e.target.value);
+        setLinkedThreeDRotation('z', value);
         const ss = getScreenshotSettings();
-        if (!ss.rotation3D) ss.rotation3D = { x: 0, y: 0, z: 0 };
-        ss.rotation3D.z = parseInt(e.target.value);
         document.getElementById('rotation-3d-z-value').textContent = formatValue(e.target.value) + '°';
         if (typeof setThreeJSRotation === 'function') {
             setThreeJSRotation(ss.rotation3D.x, ss.rotation3D.y, ss.rotation3D.z);
@@ -7365,7 +7520,7 @@ function openAiTextModal(target) {
 
     const provider = getSelectedProvider();
     const providerConfig = llmProviders[provider];
-    const apiKey = localStorage.getItem(providerConfig.storageKey);
+    const apiKey = getApiKey(provider);
     if (!apiKey) {
         showAppAlert('Add your LLM API key in Settings to generate text with AI.', 'error');
         return;
@@ -7421,7 +7576,7 @@ async function generateAiTextSuggestions() {
     const screenshot = getCurrentScreenshot();
     const provider = getSelectedProvider();
     const providerConfig = llmProviders[provider];
-    const apiKey = localStorage.getItem(providerConfig.storageKey);
+    const apiKey = getApiKey(provider);
     const language = document.getElementById('ai-text-language').value || state.currentLanguage || 'en';
     const languageName = languageNames[language] || language;
     const tone = document.getElementById('ai-text-tone').value;
@@ -7665,7 +7820,7 @@ async function aiTranslateAll() {
     // Get selected provider and API key
     const provider = getSelectedProvider();
     const providerConfig = llmProviders[provider];
-    const apiKey = localStorage.getItem(providerConfig.storageKey);
+    const apiKey = getApiKey(provider);
 
     if (!apiKey) {
         setTranslateStatus(`Add your LLM API key in Settings to use AI translation.`, 'error');
@@ -7978,7 +8133,7 @@ async function translateAllText() {
     // Get selected provider and API key
     const provider = getSelectedProvider();
     const providerConfig = llmProviders[provider];
-    const apiKey = localStorage.getItem(providerConfig.storageKey);
+    const apiKey = getApiKey(provider);
 
     if (!apiKey) {
         await showAppAlert('Add your LLM API key in Settings to use AI translation.', 'error');
@@ -8293,7 +8448,12 @@ function applyTheme(preference) {
 }
 
 function initTheme() {
-    const saved = localStorage.getItem('themePreference') || 'auto';
+    let saved = 'auto';
+    try {
+        saved = localStorage.getItem('themePreference') || 'auto';
+    } catch (_) {
+        // Storage can be unavailable in private or embedded browser previews.
+    }
     applyTheme(saved);
 }
 
@@ -9528,7 +9688,6 @@ function getCanvasDimensions() {
 
 function updateCanvas(options = {}) {
     updateProofingMeta();
-    normalizeDeviceRenderingModes();
     if (options.persist !== false) saveState(); // Persist state on every committed update
     const dims = getCanvasDimensions();
     canvas.width = dims.width;
@@ -9578,12 +9737,14 @@ function updateCanvas(options = {}) {
         const img = screenshot ? getScreenshotImage(screenshot) : null;
         const ss = getScreenshotSettings();
         const use3D = ss.use3D || false;
-        if (use3D && img && typeof renderThreeJSToCanvas === 'function' && phoneModelLoaded) {
-            // In 3D mode, update the screen texture and render the phone model
-            if (typeof updateScreenTexture === 'function') {
-                updateScreenTexture();
-            }
-            renderThreeJSToCanvas(canvas, dims.width, dims.height);
+        if (use3D && typeof renderThreeJSToCanvas === 'function') {
+            const items = getThreeDRenderItems(screenshot, state.selectedIndex, img);
+            renderThreeJSToCanvas(
+                canvas,
+                dims.width,
+                dims.height,
+                items
+            );
         } else if (!use3D) {
             const devices = screenshot?.devices || [];
             if (devices.length) devices.filter(device => device.hidden !== true).forEach(device => {
@@ -9852,10 +10013,16 @@ function renderScreenshotToCanvas(index, targetCanvas, targetCtx, dims, previewS
     const settings = screenshot.screenshot;
     const use3D = settings.use3D || false;
 
-    if (use3D && img) {
-        if (typeof renderThreeJSForScreenshot === 'function' && phoneModelLoaded) {
-            // Render 3D phone model for this specific screenshot
-            renderThreeJSForScreenshot(targetCanvas, dims.width, dims.height, index);
+    if (use3D) {
+        if (typeof renderThreeJSForScreenshot === 'function') {
+            const items = getThreeDRenderItems(screenshot, index, img);
+            renderThreeJSForScreenshot(
+                targetCanvas,
+                dims.width,
+                dims.height,
+                index,
+                items
+            );
         }
     } else if (!use3D) {
         const devices = screenshot.devices || [];
@@ -11074,26 +11241,56 @@ function waitForRenderableImage(image, label, timeoutMs = 12000) {
     });
 }
 
-function waitForPhoneModel(timeoutMs = 12000) {
-    if (typeof phoneModelLoaded === 'undefined' || phoneModelLoaded) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-        const startedAt = Date.now();
-        const check = () => {
-            if (phoneModelLoaded) {
-                resolve();
-            } else if (Date.now() - startedAt >= timeoutMs) {
-                reject(new Error('The 3D phone is still loading. Try exporting again.'));
-            } else {
-                setTimeout(check, 50);
-            }
-        };
-        check();
-    });
+function waitForPhoneModel(deviceType = 'iphone', timeoutMs = 12000) {
+    deviceType = getValidThreeDDeviceType(deviceType);
+    if (typeof isPhoneModelReady === 'function' && isPhoneModelReady(deviceType)) return Promise.resolve();
+    if (typeof loadCachedPhoneModel !== 'function') {
+        return Promise.reject(new Error(`The ${deviceType} 3D model is unavailable.`));
+    }
+    let timeout;
+    return Promise.race([
+        loadCachedPhoneModel(deviceType),
+        new Promise((_, reject) => {
+            timeout = setTimeout(
+                () => reject(new Error(`The ${deviceType} 3D model is still loading. Try exporting again.`)),
+                timeoutMs
+            );
+        })
+    ]).finally(() => clearTimeout(timeout));
+}
+
+async function prepareScreenshotFonts(screenshot) {
+    // Cloud rendering has its own offline font policy; do not fetch providers
+    // from imported cloud metadata.
+    if (isCloudDocumentContext()) return;
+    const text = screenshot.text || {};
+    const requests = [];
+    const addFont = (value, weight, italic, sample) => {
+        if (!value || !sample || googleFonts.system.some(font => font.value === value)) return;
+        const family = value.split(',')[0].replace(/^[\s'"]+|[\s'"]+$/g, '');
+        if (googleFonts.system.some(font => font.name === family)) return;
+        if (['sans-serif', 'serif', 'monospace', 'cursive', 'fantasy', 'system-ui', '-apple-system', 'AppScreen Sans'].includes(family)) return;
+        requests.push(AppScreenFontLibrary.loadFont(family, { weights: [weight || 400], italic: Boolean(italic), sample }).then(loaded => {
+            if (!loaded) throw new Error(`${family} could not load. Check your connection and retry the export.`);
+        }));
+    };
+    for (const prefix of ['headline', 'subheadline']) {
+        if (text[`${prefix}Enabled`] === false || (prefix === 'subheadline' && !text.subheadlineEnabled)) continue;
+        const lang = text[`current${prefix === 'headline' ? 'Headline' : 'Subheadline'}Lang`] || 'en';
+        addFont(text[`${prefix}Font`], text[`${prefix}Weight`], text[`${prefix}Italic`], text[`${prefix}s`]?.[lang] || '');
+    }
+    for (const element of screenshot.elements || []) {
+        if (element.type === 'text' && element.opacity !== 0) {
+            addFont(element.font, element.fontWeight, element.italic, getElementText(element));
+        }
+    }
+    await Promise.all(requests);
 }
 
 async function prepareScreenshotForExport(index) {
     const screenshot = state.screenshots[index];
     if (!screenshot) return;
+    await prepareScreenshotFonts(screenshot);
     const background = screenshot.background || {};
     const images = new Map();
     const addImage = (image, label) => {
@@ -11109,10 +11306,16 @@ async function prepareScreenshotForExport(index) {
     await Promise.all([...images].map(([image, label]) => waitForRenderableImage(image, label)));
 
     if (screenshot.screenshot?.use3D) {
-        if (typeof switchPhoneModel === 'function') {
-            switchPhoneModel(screenshot.screenshot.device3D || 'iphone');
+        if (typeof showThreeJS === 'function') showThreeJS(true);
+        if (typeof isThreeJSRendererReady !== 'function' || !isThreeJSRendererReady()) {
+            const message = window.location.protocol === 'file:'
+                ? '3D export requires the local server. Open http://localhost:8000/ instead of index.html directly.'
+                : 'The 3D renderer is unavailable. Check WebGL and reload the page.';
+            throw new Error(message);
         }
-        await waitForPhoneModel();
+        const renderItems = getThreeDRenderItems(screenshot, index, getScreenshotImage(screenshot));
+        const deviceTypes = [...new Set(renderItems.map(item => item.settings.device3D || 'iphone'))];
+        await Promise.all(deviceTypes.map(deviceType => waitForPhoneModel(deviceType)));
     }
     updateCanvas();
 }

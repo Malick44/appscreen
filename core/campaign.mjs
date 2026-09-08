@@ -121,7 +121,7 @@ function addLayout(doc, template, count) {
       if (prior) layout.devices.unshift({ ...prior.geometry, centerX: prior.geometry.centerX - index, sourceOffset: -1 });
     }
     const source = doc.sources[index % doc.sources.length];
-    const scene = { id: uid('scene'), name: `Screen ${index + 1}`, sourceId: source.id, background: merge(DEFAULT_BACKGROUND, layout.background), screenshot: merge(DEFAULT_DEVICE, pick(appearance, appearanceKeys)), text: merge(DEFAULT_TEXT, layout.text), devices: [], elements: (layout.shapes || []).map(shape => ({ ...clone(shape), id: uid('element'), type: 'shape', shapeType: shape.type, name: shape.type })), popouts: [], locks: {} };
+    const scene = { id: uid('scene'), name: `Screen ${index + 1}`, sourceId: source.id, background: merge(DEFAULT_BACKGROUND, layout.background), screenshot: merge(DEFAULT_DEVICE, pick(appearance, appearanceKeys)), text: merge(DEFAULT_TEXT, layout.text), devices: [], elements: (layout.shapes || []).map(shape => ({ ...clone(shape), id: uid('element'), type: 'shape', shapeType: shape.type, name: shape.type })), popouts: (layout.popouts || []).map(popout => ({ ...clone(popout), id: uid('popout'), templatePopout: true })), locks: {} };
     scene.text.currentHeadlineLang = scene.text.currentSubheadlineLang = doc.locale;
     scene.text.headlines = { [doc.locale]: '' }; scene.text.subheadlines = { [doc.locale]: '' };
     for (const device of layout.devices || [DEFAULT_DEVICE]) {

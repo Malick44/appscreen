@@ -22,7 +22,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Geist+Mono:wght@400;500&family=Geist:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=20260904-pulse-portrait-1">
+    <link rel="stylesheet" href="styles.css?v=20260907-fancy-fonts-1">
     <link rel="stylesheet" href="ui-redesign.css?v=20260904-pulse-portrait-1">
 
     <!-- Detect Tauri and add class for native styling -->
@@ -910,16 +910,16 @@
                     <div class="control-group">
                         <label class="control-label">Device Type</label>
                         <div class="btn-group" id="device-type-selector">
-                            <button class="active" data-type="2d">2D</button>
-                            <button data-type="3d">3D</button>
+                            <button type="button" class="active" data-type="2d" aria-pressed="true">2D</button>
+                            <button type="button" data-type="3d" aria-pressed="false">3D</button>
                         </div>
                     </div>
 
                     <div id="linked-3d-tip" class="tip-box device-linked-tip" style="display: none;">
                         <img src="img/info.svg" width="16" height="16" alt="Info">
                         <div class="tip-content">
-                            <strong>3D needs one visible device</strong>
-                            <span>Show the device and remove extra or linked devices before switching to 3D.</span>
+                            <strong>Template-aware 3D</strong>
+                            <span>Every visible device keeps its source, layer order, and connected-screen alignment.</span>
                         </div>
                     </div>
 
@@ -927,26 +927,26 @@
                         <div class="control-group">
                             <label class="control-label">Device Model</label>
                             <div class="btn-group" id="device-3d-selector">
-                                <button class="active" data-model="iphone">iPhone</button>
-                                <button data-model="samsung">Samsung</button>
+                                <button type="button" class="active" data-model="iphone" aria-pressed="true">iPhone</button>
+                                <button type="button" data-model="samsung" aria-pressed="false">Samsung</button>
                             </div>
                         </div>
                         <div class="control-group">
-                            <label class="control-label">Rotation X (Tilt)</label>
+                            <label class="control-label" for="rotation-3d-x">Rotation X (Tilt)</label>
                             <div class="control-row">
                                 <input type="range" id="rotation-3d-x" min="-45" max="45" value="0">
                                 <span class="range-value" id="rotation-3d-x-value">0°</span>
                             </div>
                         </div>
                         <div class="control-group">
-                            <label class="control-label">Rotation Y (Turn)</label>
+                            <label class="control-label" for="rotation-3d-y">Rotation Y (Turn)</label>
                             <div class="control-row">
                                 <input type="range" id="rotation-3d-y" min="-45" max="45" value="0">
                                 <span class="range-value" id="rotation-3d-y-value">0°</span>
                             </div>
                         </div>
                         <div class="control-group">
-                            <label class="control-label">Rotation Z (Roll)</label>
+                            <label class="control-label" for="rotation-3d-z">Rotation Z (Roll)</label>
                             <div class="control-row">
                                 <input type="range" id="rotation-3d-z" min="-45" max="45" value="0">
                                 <span class="range-value" id="rotation-3d-z-value">0°</span>
@@ -1259,7 +1259,8 @@
                                             autocomplete="off">
                                     </div>
                                     <div class="font-picker-categories">
-                                        <button class="font-category active" data-category="popular">Popular</button>
+                                        <button class="font-category active" data-category="fancy">Fancy</button>
+                                        <button class="font-category" data-category="popular">Popular</button>
                                         <button class="font-category" data-category="system">System</button>
                                         <button class="font-category" data-category="all">All</button>
                                     </div>
@@ -1428,7 +1429,8 @@
                                             autocomplete="off">
                                     </div>
                                     <div class="font-picker-categories">
-                                        <button class="font-category active" data-category="popular">Popular</button>
+                                        <button class="font-category active" data-category="fancy">Fancy</button>
+                                        <button class="font-category" data-category="popular">Popular</button>
                                         <button class="font-category" data-category="system">System</button>
                                         <button class="font-category" data-category="all">All</button>
                                     </div>
@@ -1765,8 +1767,8 @@
                                                 autocomplete="off">
                                         </div>
                                         <div class="font-picker-categories">
-                                            <button class="font-category active"
-                                                data-category="popular">Popular</button>
+                                            <button class="font-category active" data-category="fancy">Fancy</button>
+                                            <button class="font-category" data-category="popular">Popular</button>
                                             <button class="font-category" data-category="system">System</button>
                                             <button class="font-category" data-category="all">All</button>
                                         </div>
@@ -2647,14 +2649,15 @@
         </div>
     </div>
 
-    <script src="llm.js"></script>
+    <script src="llm.js?v=20260907-template-3d-3"></script>
     <script src="language-utils.js"></script>
-    <script src="magical-titles.js"></script>
+    <script src="magical-titles.js?v=20260907-template-3d-3"></script>
     <script src="ai-image-gen.js?v=20260904-pulse-portrait-1"></script>
     <script src="lucide-icons.js"></script>
-    <script src="three-renderer.js"></script>
-    <script src="templates.js?v=20260906-fixed-template-lengths-1"></script>
-    <script src="app.js?v=20260906-fixed-template-lengths-1"></script>
+    <script src="three-renderer.js?v=20260907-template-3d-4"></script>
+    <script src="templates.js?v=20260907-insight-showcase-2"></script>
+    <script src="font-library.js?v=20260907-fancy-fonts-2"></script>
+    <script src="app.js?v=20260907-fancy-fonts-2"></script>
     <script type="module" src="/core/editor-bridge.mjs"></script>
     <script type="module" src="/saas/editor-cloud.js"></script>
 </body>

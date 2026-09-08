@@ -50,7 +50,11 @@ const llmProviders = {
 function getSelectedModel(provider) {
     const config = llmProviders[provider];
     if (!config) return null;
-    return localStorage.getItem(config.modelStorageKey) || config.defaultModel;
+    try {
+        return localStorage.getItem(config.modelStorageKey) || config.defaultModel;
+    } catch (_) {
+        return config.defaultModel;
+    }
 }
 
 /**
@@ -58,7 +62,11 @@ function getSelectedModel(provider) {
  * @returns {string} - Provider key
  */
 function getSelectedProvider() {
-    return localStorage.getItem('aiProvider') || 'anthropic';
+    try {
+        return localStorage.getItem('aiProvider') || 'anthropic';
+    } catch (_) {
+        return 'anthropic';
+    }
 }
 
 /**
@@ -69,7 +77,11 @@ function getSelectedProvider() {
 function getApiKey(provider) {
     const config = llmProviders[provider];
     if (!config) return null;
-    return localStorage.getItem(config.storageKey);
+    try {
+        return localStorage.getItem(config.storageKey);
+    } catch (_) {
+        return null;
+    }
 }
 
 /**

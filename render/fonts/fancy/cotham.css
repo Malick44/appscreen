@@ -1,0 +1,8 @@
+/* Cotham Sans by Sebastien Sanfilippo. SIL OFL 1.1; see Cotham-OFL.txt and NOTICE.md. */
+@font-face {
+    font-family: 'CothamSansRegular';
+    src: url('./CothamSansRegular.otf') format('opentype');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}

@@ -24,7 +24,7 @@ import { EmailDelivery } from './email.js';
 import { EmailIncidents } from './email-incidents.js';
 import { importProjectBackup, PROJECT_IMPORT_LIMITS } from './project-import.js';
 
-const publicFiles=new Set(['app.js','styles.css','ui-redesign.css','three-renderer.js','language-utils.js','magical-titles.js','llm.js','ai-image-gen.js','lucide-icons.js','templates.js','favicon.ico']);
+const publicFiles=new Set(['app.js','font-library.js','styles.css','ui-redesign.css','three-renderer.js','language-utils.js','magical-titles.js','llm.js','ai-image-gen.js','lucide-icons.js','templates.js','favicon.ico']);
 function publicResource(path:string):string|null {
   if(path==='/saas/vendor/supabase.js')return 'node_modules/@supabase/supabase-js/dist/umd/supabase.js';
   if(path==='/third-party/supabase-license.txt')return 'node_modules/@supabase/supabase-js/LICENSE';
@@ -172,7 +172,7 @@ export async function createApp(config:Config,db:DB){
     } catch(error) {req.raw.removeListener('aborted',disconnected);reply.raw.removeListener('close',disconnected);throw error;}
   });
   await registerMcp(app,services,auth.authenticate,{baseUrl:config.baseUrl,authorizationServers:config.mcpOAuthEnabled?[`${config.supabaseUrl}/auth/v1`]:[],oauthScopes:config.mcpOAuthEnabled?['openid']:undefined});
-  const types:Record<string,string>={html:'text/html; charset=utf-8',js:'text/javascript; charset=utf-8',mjs:'text/javascript; charset=utf-8',css:'text/css; charset=utf-8',txt:'text/plain; charset=utf-8',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',svg:'image/svg+xml',woff2:'font/woff2',glb:'model/gltf-binary',json:'application/json'};
+  const types:Record<string,string>={html:'text/html; charset=utf-8',js:'text/javascript; charset=utf-8',mjs:'text/javascript; charset=utf-8',css:'text/css; charset=utf-8',txt:'text/plain; charset=utf-8',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',svg:'image/svg+xml',woff2:'font/woff2',otf:'font/otf',ttf:'font/ttf',glb:'model/gltf-binary',json:'application/json'};
   app.get('/*',async(req,reply)=>{
     const path=decodeURIComponent(req.url.split('?')[0]),relative=publicResource(path);invariant(relative,'NOT_FOUND','Page not found.',404);
     const filename=resolve(rootDirectory,relative);invariant(filename.startsWith(rootDirectory+sep),'NOT_FOUND','Page not found.',404);const bytes=await readFile(filename).catch(()=>null);invariant(bytes,'NOT_FOUND','Page not found.',404);

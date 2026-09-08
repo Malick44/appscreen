@@ -162,8 +162,9 @@ test('cloud imports and cached reloads never auto-fetch fonts or icons from meta
   const fonts = [], icons = [], images = [], controls = new Map();
   const context = {
     state: { cloudDocument: { id: 'cloud' } }, window: { location: { pathname: '/editor', search: '?project=cloud' } }, URLSearchParams,
-    googleFonts: { system: [] }, getTextSettings: () => ({ headlineFont: "'Untrusted imported font', sans-serif" }),
-    loadGoogleFont: name => fonts.push(name), getLucideImage: name => { icons.push(name); return Promise.resolve({}); },
+    googleFonts: { system: [], loaded: new Set() }, AppScreenFontLibrary: { getFont: name => ({ name }) },
+    getTextSettings: () => ({ headlineFont: "'Untrusted imported font', sans-serif" }),
+    loadGoogleFont: name => { fonts.push(name); return Promise.resolve(true); }, getLucideImage: name => { icons.push(name); return Promise.resolve({}); },
     document: { getElementById: id => { if (!controls.has(id)) controls.set(id, { style: {} }); return controls.get(id); } },
     Image: class { constructor() { images.push(this); } }, updateCanvas() {}, console,
   };

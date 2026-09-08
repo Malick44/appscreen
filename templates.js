@@ -1,5 +1,6 @@
 // Versioned scene templates inspired by bold editorial App Store screenshot layouts.
-const TEMPLATE_CATALOG_VERSION = 5;
+const TEMPLATE_CATALOG_VERSION = 9;
+const TEMPLATE_BACKGROUND_COLOR = '#F4F1EA';
 
 const TIDAL_DEVICE_STYLE = {
   cornerRadius: 32,
@@ -25,12 +26,13 @@ function createTidalDevice(sourceOffset, centerX, centerY, scale, rotation, opac
   };
 }
 
-function createTidalBackground() {
+function createTemplateBackground(overrides = {}) {
   return {
-    type: 'gradient', solid: '#72D7DC', image: null, imageSrc: null,
+    type: 'solid', solid: TEMPLATE_BACKGROUND_COLOR, image: null, imageSrc: null,
     imageFit: 'cover', imageBlur: 0, overlayColor: '#000000', overlayOpacity: 0,
     noise: false, noiseIntensity: 10,
-    gradient: { angle: 168, stops: [{ color: '#62CED5', position: 0 }, { color: '#B9F0ED', position: 100 }] }
+    gradient: { angle: 168, stops: [{ color: TEMPLATE_BACKGROUND_COLOR, position: 0 }, { color: TEMPLATE_BACKGROUND_COLOR, position: 100 }] },
+    ...overrides
   };
 }
 
@@ -88,9 +90,9 @@ function createTidalVariant(definition, variantIndex) {
     type: 'sequence',
     version: 1,
     screenCount: 3,
-    palette: ['#72D7DC', '#B9F0ED', '#12333D'],
+    palette: [TEMPLATE_BACKGROUND_COLOR, '#FFFFFF', '#12333D'],
     scenes: definition.devices.map((devices, sceneIndex) => ({
-      background: createTidalBackground(),
+      background: createTemplateBackground(),
       shapes: TIDAL_MARKER_SETS[(sceneIndex + variantIndex) % TIDAL_MARKER_SETS.length].map(shape => ({ ...shape })),
       devices: devices.map(device => ({
         ...device,
@@ -230,41 +232,41 @@ const TIDAL_RELAY_CONTINUATION_CYCLE = [
 
 const BASE_APP_TEMPLATES = [
   {
-    id: 'violet-orbit-left', name: 'Violet Orbit', category: 'Bold Minimal', version: 1,
-    palette: ['#5144F5', '#E9E8F7', '#FFFFFF'],
-    background: { type: 'solid', solid: '#5144F5' },
+    id: 'violet-orbit-left', name: 'Violet Orbit', category: 'Bold Minimal', version: 2,
+    palette: [TEMPLATE_BACKGROUND_COLOR, '#E9E8F7', '#17171B'],
+    background: createTemplateBackground(),
     shapes: [{ type: 'ellipse', x: 78, y: 48, width: 116, height: 52, fill: '#E9E8F7', rotation: 0, layer: 'behind-screenshot', opacity: 100 }],
     devices: [{ source: 'current', scale: 78, x: 62, y: 57, rotation: 8, perspective: 0 }],
-    text: { position: 'top', offsetY: 6, blockX: 22, blockWidth: 36, align: 'left', headlineSize: 104, headlineWeight: '700', headlineColor: '#FFFFFF', subheadlineColor: '#FFFFFF' }
+    text: { position: 'top', offsetY: 6, blockX: 22, blockWidth: 36, align: 'left', headlineSize: 104, headlineWeight: '700', headlineColor: '#17171B', subheadlineColor: '#17171B' }
   },
   {
-    id: 'lavender-stage-top', name: 'Lavender Stage', category: 'Bold Minimal', version: 1,
-    palette: ['#E9E8F7', '#5144F5', '#17171B'],
-    background: { type: 'solid', solid: '#E9E8F7' },
+    id: 'lavender-stage-top', name: 'Lavender Stage', category: 'Bold Minimal', version: 2,
+    palette: [TEMPLATE_BACKGROUND_COLOR, '#5144F5', '#17171B'],
+    background: createTemplateBackground(),
     shapes: [{ type: 'ellipse', x: 50, y: 78, width: 145, height: 52, fill: '#5144F5', rotation: 0, layer: 'behind-screenshot', opacity: 100 }],
     devices: [{ source: 'current', scale: 72, x: 50, y: 57, rotation: 0, perspective: 0 }],
     text: { position: 'top', offsetY: 7, blockX: 50, blockWidth: 84, align: 'center', headlineSize: 100, headlineWeight: '700', headlineColor: '#17171B', subheadlineColor: '#17171B' }
   },
   {
-    id: 'lavender-stage-bottom', name: 'Lavender Bottom', category: 'Bold Minimal', version: 1,
-    palette: ['#E9E8F7', '#5144F5', '#17171B'],
-    background: { type: 'solid', solid: '#E9E8F7' },
+    id: 'lavender-stage-bottom', name: 'Lavender Bottom', category: 'Bold Minimal', version: 2,
+    palette: [TEMPLATE_BACKGROUND_COLOR, '#5144F5', '#17171B'],
+    background: createTemplateBackground(),
     shapes: [{ type: 'ellipse', x: 18, y: 24, width: 92, height: 44, fill: '#5144F5', rotation: 0, layer: 'behind-screenshot', opacity: 100 }],
     devices: [{ source: 'current', scale: 76, x: 52, y: 40, rotation: 0, perspective: 0 }],
     text: { position: 'bottom', offsetY: 7, blockX: 50, blockWidth: 84, align: 'center', headlineSize: 100, headlineWeight: '700', headlineColor: '#17171B', subheadlineColor: '#17171B' }
   },
   {
-    id: 'violet-spotlight', name: 'Violet Spotlight', category: 'Bold Minimal', version: 1,
-    palette: ['#5144F5', '#E9E8F7', '#FFFFFF'],
-    background: { type: 'solid', solid: '#5144F5' },
+    id: 'violet-spotlight', name: 'Violet Spotlight', category: 'Bold Minimal', version: 2,
+    palette: [TEMPLATE_BACKGROUND_COLOR, '#E9E8F7', '#17171B'],
+    background: createTemplateBackground(),
     shapes: [{ type: 'ellipse', x: -5, y: 50, width: 88, height: 56, fill: '#E9E8F7', rotation: 0, layer: 'behind-screenshot', opacity: 100 }],
     devices: [{ source: 'current', scale: 70, x: 57, y: 54, rotation: -2, perspective: 0 }],
-    text: { position: 'top', offsetY: 6, blockX: 50, blockWidth: 82, align: 'center', headlineSize: 100, headlineWeight: '700', headlineColor: '#FFFFFF', subheadlineColor: '#FFFFFF' }
+    text: { position: 'top', offsetY: 6, blockX: 50, blockWidth: 82, align: 'center', headlineSize: 100, headlineWeight: '700', headlineColor: '#17171B', subheadlineColor: '#17171B' }
   },
   {
-    id: 'dual-device-cascade', name: 'Dual Cascade', category: 'Editorial', version: 1,
-    palette: ['#E9E8F7', '#5144F5', '#17171B'],
-    background: { type: 'solid', solid: '#E9E8F7' },
+    id: 'dual-device-cascade', name: 'Dual Cascade', category: 'Editorial', version: 2,
+    palette: [TEMPLATE_BACKGROUND_COLOR, '#5144F5', '#17171B'],
+    background: createTemplateBackground(),
     shapes: [{ type: 'ellipse', x: 50, y: 10, width: 130, height: 45, fill: '#5144F5', rotation: 0, layer: 'behind-screenshot', opacity: 100 }],
     devices: [
       { source: 'current', scale: 58, x: 34, y: 48, rotation: -5, perspective: 0, opacity: 92 },
@@ -273,9 +275,9 @@ const BASE_APP_TEMPLATES = [
     text: { position: 'bottom', offsetY: 6, blockX: 50, blockWidth: 84, align: 'center', headlineSize: 96, headlineWeight: '700', headlineColor: '#17171B', subheadlineColor: '#17171B' }
   },
   {
-    id: 'split-library', name: 'Split Library', category: 'Editorial', version: 1,
-    palette: ['#5144F5', '#E9E8F7', '#17171B'],
-    background: { type: 'solid', solid: '#E9E8F7' },
+    id: 'split-library', name: 'Split Library', category: 'Editorial', version: 2,
+    palette: [TEMPLATE_BACKGROUND_COLOR, '#5144F5', '#17171B'],
+    background: createTemplateBackground(),
     shapes: [{ type: 'rectangle', x: 25, y: 50, width: 50, height: 100, fill: '#5144F5', rotation: 0, layer: 'behind-screenshot', opacity: 100 }],
     devices: [{ source: 'current', scale: 72, x: 56, y: 54, rotation: 0, perspective: 0 }],
     text: { position: 'top', offsetY: 6, blockX: 72, blockWidth: 46, align: 'center', headlineSize: 94, headlineWeight: '700', headlineColor: '#17171B', subheadlineColor: '#17171B' }
@@ -285,32 +287,14 @@ const BASE_APP_TEMPLATES = [
     name: 'Pulse Portrait',
     description: 'Lifestyle portrait with a feathered photo, glowing pulse, and angled iPhone',
     category: 'Lifestyle Editorial',
-    version: 1,
-    palette: ['#F7F3FC', '#DDE9F8', '#17122F'],
+    version: 2,
+    palette: [TEMPLATE_BACKGROUND_COLOR, '#B89CFF', '#17122F'],
     previewCopy: {
       headline: ['Your Library,', 'Your Audio'],
       subheadline: ['All your saved', 'listening clips in', 'one place.']
     },
     photoPolicy: 'preserve-existing',
-    background: {
-      type: 'gradient',
-      solid: '#F7F3FC',
-      image: null,
-      imageSrc: null,
-      imageFit: 'cover',
-      imageBlur: 0,
-      overlayColor: '#000000',
-      overlayOpacity: 0,
-      noise: false,
-      noiseIntensity: 8,
-      gradient: {
-        angle: 112,
-        stops: [
-          { color: '#FAF6FC', position: 0 },
-          { color: '#E6EDF8', position: 58 },
-          { color: '#D8CAFA', position: 100 }
-        ]
-      },
+    background: createTemplateBackground({
       photo: {
         enabled: true,
         label: 'Lifestyle photo',
@@ -336,7 +320,7 @@ const BASE_APP_TEMPLATES = [
           bottomEndOpacity: 0
         }
       }
-    },
+    }),
     shapes: [
       {
         type: 'pulse',
@@ -425,15 +409,10 @@ const BASE_APP_TEMPLATES = [
   {
     id: 'tidal-relay', name: 'Tidal Relay', description: 'Balanced diagonal device handoff', category: 'Sequences', type: 'sequence', version: 1,
     screenCount: 3,
-    palette: ['#72D7DC', '#B9F0ED', '#12333D'],
+    palette: [TEMPLATE_BACKGROUND_COLOR, '#FFFFFF', '#12333D'],
     scenes: [
       {
-        background: {
-          type: 'gradient', solid: '#72D7DC', image: null, imageSrc: null,
-          imageFit: 'cover', imageBlur: 0, overlayColor: '#000000', overlayOpacity: 0,
-          noise: false, noiseIntensity: 10,
-          gradient: { angle: 168, stops: [{ color: '#62CED5', position: 0 }, { color: '#B9F0ED', position: 100 }] }
-        },
+        background: createTemplateBackground(),
         shapes: [
           { type: 'ellipse', x: 18, y: 32, width: 5, height: 2.3, fill: '#FFFFFF', rotation: 0, layer: 'behind-screenshot', opacity: 72 },
           { type: 'ellipse', x: 78, y: 20, width: 2.5, height: 1.2, fill: '#FFFFFF', rotation: 0, layer: 'behind-screenshot', opacity: 55 }
@@ -444,12 +423,7 @@ const BASE_APP_TEMPLATES = [
         text: { position: 'top', offsetY: 7, blockX: 50, blockWidth: 84, align: 'center', headlineSize: 92, headlineWeight: '700', headlineColor: '#12333D', subheadlineColor: '#12333D' }
       },
       {
-        background: {
-          type: 'gradient', solid: '#72D7DC', image: null, imageSrc: null,
-          imageFit: 'cover', imageBlur: 0, overlayColor: '#000000', overlayOpacity: 0,
-          noise: false, noiseIntensity: 10,
-          gradient: { angle: 168, stops: [{ color: '#62CED5', position: 0 }, { color: '#B9F0ED', position: 100 }] }
-        },
+        background: createTemplateBackground(),
         shapes: [
           { type: 'ellipse', x: 88, y: 22, width: 4, height: 1.8, fill: '#FFFFFF', rotation: 0, layer: 'behind-screenshot', opacity: 60 },
           { type: 'ellipse', x: 15, y: 82, width: 2.5, height: 1.2, fill: '#FFFFFF', rotation: 0, layer: 'behind-screenshot', opacity: 48 }
@@ -461,12 +435,7 @@ const BASE_APP_TEMPLATES = [
         text: { position: 'bottom', offsetY: 6, blockX: 50, blockWidth: 82, align: 'center', headlineSize: 92, headlineWeight: '700', headlineColor: '#12333D', subheadlineColor: '#12333D' }
       },
       {
-        background: {
-          type: 'gradient', solid: '#72D7DC', image: null, imageSrc: null,
-          imageFit: 'cover', imageBlur: 0, overlayColor: '#000000', overlayOpacity: 0,
-          noise: false, noiseIntensity: 10,
-          gradient: { angle: 168, stops: [{ color: '#62CED5', position: 0 }, { color: '#B9F0ED', position: 100 }] }
-        },
+        background: createTemplateBackground(),
         shapes: [
           { type: 'ellipse', x: 26, y: 45, width: 5, height: 2.3, fill: '#FFFFFF', rotation: 0, layer: 'behind-screenshot', opacity: 62 },
           { type: 'ellipse', x: 78, y: 62, width: 2.5, height: 1.2, fill: '#FFFFFF', rotation: 0, layer: 'behind-screenshot', opacity: 50 }
@@ -528,14 +497,20 @@ function fitTerminalDevice(device) {
   const assumedPhoneAspect = 2556 / 1179;
   const horizontalHalfExtent = scale / 200
     * (Math.abs(Math.cos(radians)) + assumedPhoneAspect * Math.abs(Math.sin(radians)));
+  const verticalHalfExtent = scale / 200
+    * (Math.abs(Math.cos(radians)) + (1 / assumedPhoneAspect) * Math.abs(Math.sin(radians)));
   const safeMargin = 0.035;
-  const minimumCenter = safeMargin + horizontalHalfExtent;
-  const maximumCenter = Math.max(minimumCenter, 1 - safeMargin - horizontalHalfExtent);
+  const minimumCenterX = safeMargin + horizontalHalfExtent;
+  const maximumCenterX = Math.max(minimumCenterX, 1 - safeMargin - horizontalHalfExtent);
+  const minimumCenterY = safeMargin + verticalHalfExtent;
+  const maximumCenterY = Math.max(minimumCenterY, 1 - safeMargin - verticalHalfExtent);
 
   terminal.scale = scale;
   terminal.rotation = rotation;
-  terminal.centerX = Math.min(maximumCenter, Math.max(minimumCenter, Number(terminal.centerX) || 0.5));
+  terminal.centerX = Math.min(maximumCenterX, Math.max(minimumCenterX, Number(terminal.centerX) || 0.5));
+  terminal.centerY = Math.min(maximumCenterY, Math.max(minimumCenterY, Number(terminal.centerY) || 0.5));
   terminal.x = terminal.centerX * 100;
+  terminal.y = terminal.centerY * 100;
   terminal.continueToNext = false;
   return terminal;
 }
@@ -572,17 +547,80 @@ function createFixedLengthSequenceTemplate(template, screenCount) {
   return {
     ...cloneTemplateValue(template),
     id: screenCount === 3 ? template.id : `${template.id}-${screenCount}`,
-    version: screenCount === 3 ? Math.max(2, Number(template.version) || 1) : 1,
+    version: screenCount === 3 ? Math.max(4, Number(template.version) || 1) : 3,
     screenCount,
     fixedLength: true,
     scenes
   };
 }
 
+function createInsightShowcaseTemplates() {
+  const device = (centerX, centerY, scale, rotation) => ({
+    sourceOffset: 0, positionMode: 'canvas', centerX, centerY,
+    scale, x: 50, y: 50, rotation, perspective: 0, opacity: 100,
+    cornerRadius: 32,
+    frame: { enabled: true, color: '#242426', width: 9, opacity: 100 },
+    shadow: { enabled: true, color: '#252322', blur: 38, opacity: 22, x: 0, y: 18 },
+    use3D: true, device3D: 'iphone', frameColor: 'white',
+    rotation3D: { x: 10, y: -16, z: 0 }
+  });
+  const detailCard = (x, y, cropY = 20, cropHeight = 30, width = 48) => ({
+    cropX: 6, cropY, cropWidth: 88, cropHeight,
+    x, y, width, rotation: 0, opacity: 100, cornerRadius: 19,
+    shadow: { enabled: true, color: '#242321', blur: 34, opacity: 20, x: 0, y: 14 },
+    border: { enabled: true, color: '#FFFFFF', width: 6, opacity: 100 }
+  });
+  const insetPhone = {
+    cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100,
+    x: 28, y: 80, width: 34, rotation: -1, opacity: 100, cornerRadius: 35,
+    shadow: { enabled: true, color: '#242321', blur: 40, opacity: 25, x: 0, y: 16 },
+    border: { enabled: true, color: '#242426', width: 7, opacity: 100 }
+  };
+  const text = {
+    headlineEnabled: true, subheadlineEnabled: true, perLanguageLayout: false,
+    position: 'top', offsetY: 5.5, blockX: 50, blockWidth: 80, align: 'left',
+    headlineFont: '-apple-system, BlinkMacSystemFont, sans-serif',
+    headlineSize: 112, headlineWeight: '700', headlineColor: '#191919',
+    headlineGradient: false, headlineItalic: false,
+    subheadlineFont: '-apple-system, BlinkMacSystemFont, sans-serif',
+    subheadlineSize: 54, subheadlineWeight: '400', subheadlineColor: '#57554F',
+    subheadlineOpacity: 100, lineHeight: 115
+  };
+  const previewCopy = [
+    { headline: ['Every detail,', 'in focus.'], subheadline: ['Give the important', 'parts room to shine.'] },
+    { headline: ['A closer look.', 'A clearer story.'], subheadline: [] },
+    { headline: ['The whole', 'picture.'], subheadline: ['One place for', 'every detail.'] }
+  ];
+  const base = {
+    id: 'insight-showcase', name: 'Insight Showcase', category: 'Editorial Showcase',
+    description: 'An oversized angled phone with floating screenshot detail cards',
+    type: 'sequence', version: 1,
+    palette: [TEMPLATE_BACKGROUND_COLOR, '#FFFFFF', '#191919'],
+    scenes: [
+      { devices: [device(1.06, 0.81, 116, 20)], popouts: [detailCard(38, 46), insetPhone] },
+      { devices: [device(1.04, 0.78, 78, -12)], popouts: [detailCard(62, 80, 46, 34)] },
+      { devices: [device(0.83, 0.72, 86, 20)], popouts: [detailCard(32, 84, 26, 24, 44)] }
+    ].map((scene, index) => ({
+      ...scene, background: createTemplateBackground(), shapes: [],
+      text: { ...text }, previewCopy: previewCopy[index]
+    }))
+  };
+  const single = {
+    id: 'insight-showcase-single', name: base.name, category: base.category,
+    description: 'An angled hero phone with an inset screen and editable detail card',
+    version: 1, screenCount: 1, fixedLength: true,
+    palette: [...base.palette], background: createTemplateBackground(), shapes: [],
+    devices: [fitTerminalDevice(device(0.65, 0.66, 68, 8))],
+    popouts: [detailCard(33, 48, 20, 24, 42), { ...insetPhone, x: 26, y: 81, width: 29 }],
+    text: { ...text }, previewCopy: previewCopy[0]
+  };
+  return [single, ...[2, ...FIXED_SEQUENCE_LENGTHS].map(count => createFixedLengthSequenceTemplate(base, count))];
+}
+
 const APP_TEMPLATES = BASE_APP_TEMPLATES.flatMap(template => {
   if (template.type !== 'sequence') return [{ ...template, screenCount: 1, fixedLength: true }];
   return FIXED_SEQUENCE_LENGTHS.map(screenCount => createFixedLengthSequenceTemplate(template, screenCount));
-});
+}).concat(createInsightShowcaseTemplates());
 
 // The static editor and backend consume the same versioned template catalog.
 globalThis.AppScreenTemplates = { version: TEMPLATE_CATALOG_VERSION, templates: APP_TEMPLATES };

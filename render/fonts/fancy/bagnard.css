@@ -1,0 +1,8 @@
+/* Bagnard by Sebastien Sanfilippo. SIL OFL 1.1; see Bagnard-OFL.txt and NOTICE.md. */
+@font-face {
+    font-family: 'BagnardRegular';
+    src: url('./BagnardRegular.otf') format('opentype');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
