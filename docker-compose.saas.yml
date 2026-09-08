@@ -1,0 +1,71 @@
+# Opt-in SaaS deployment; the existing static-site Compose files are unchanged.
+# See deploy/COOLIFY.md. Secrets are runtime-only, never Docker build arguments.
+x-appscreen-build: &appscreen-build
+  context: .
+  dockerfile: Dockerfile.saas
+
+x-appscreen-environment: &appscreen-environment
+  NODE_ENV: production
+  PORT: '8001'
+  HOST: 0.0.0.0
+  APP_BASE_URL: ${APP_BASE_URL:?Set the exact public HTTPS origin}
+  DATABASE_URL: ${DATABASE_URL:?Set the intended PostgreSQL connection}
+  APPSCREEN_SIGNING_SECRET: ${APPSCREEN_SIGNING_SECRET:?Set one shared strong signing secret}
+  SUPABASE_URL: ${SUPABASE_URL:?Set the intended Supabase project URL}
+  SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:?Set the Supabase publishable key}
+  SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?Set the server-only storage key}
+  SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-appscreen-private}
+  APPSCREEN_DEV_AUTH: 'false'
+  APPSCREEN_EMBEDDED_WORKER: 'false'
+  APPSCREEN_ENABLE_AI: 'false'
+  APPSCREEN_MCP_OAUTH: 'false'
+  APPSCREEN_EMAIL_ENABLED: 'false'
+  # This initial rollout cannot enable paid providers just by inheriting a key.
+  OPENAI_API_KEY: ''
+  STRIPE_SECRET_KEY: ''
+  STRIPE_WEBHOOK_SECRET: ''
+  STRIPE_PRO_PRICE_ID: ''
+  RESEND_API_KEY: ''
+  RESEND_WEBHOOK_SECRET: ''
+  APPSCREEN_OPERATOR_USER_IDS: ${APPSCREEN_OPERATOR_USER_IDS:-}
+  TRIAL_CREDITS: ${TRIAL_CREDITS:-5}
+  PRO_MONTHLY_CREDITS: ${PRO_MONTHLY_CREDITS:-100}
+  DESIGN_CREDITS: ${DESIGN_CREDITS:-5}
+  REVISION_CREDITS: ${REVISION_CREDITS:-1}
+  MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
+  MAX_IMAGE_PIXELS: ${MAX_IMAGE_PIXELS:-40000000}
+  MAX_STORAGE_BYTES: ${MAX_STORAGE_BYTES:-524288000}
+  MAX_PROJECTS: ${MAX_PROJECTS:-25}
+  MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-2}
+
+services:
+  web:
+    build: *appscreen-build
+    command: [node, --import, tsx, deploy/start.mjs, web]
+    environment: *appscreen-environment
+    expose:
+      - '8001'
+    restart: unless-stopped
+    stop_grace_period: 60s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - --input-type=module
+        - -e
+        - "const response = await fetch('http://127.0.0.1:8001/health', {signal: AbortSignal.timeout(4000)}); if (!response.ok || (await response.json()).status !== 'ok') process.exit(1);"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  worker:
+    build: *appscreen-build
+    command: [node, --import, tsx, deploy/start.mjs, worker]
+    environment: *appscreen-environment
+    restart: unless-stopped
+    stop_grace_period: 120s
+    shm_size: 1gb
+    # No public port or HTTP health check: inspect process/queue and canary export.
+    healthcheck:
+      disable: true

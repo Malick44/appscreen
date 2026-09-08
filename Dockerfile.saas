@@ -30,7 +30,7 @@ COPY saas/ ./saas/
 COPY img/ ./img/
 COPY models/ ./models/
 COPY deploy/ ./deploy/
-COPY index.html app.js styles.css ui-redesign.css three-renderer.js language-utils.js magical-titles.js llm.js ai-image-gen.js lucide-icons.js templates.js ./
+COPY index.html app.js font-library.js styles.css ui-redesign.css three-renderer.js language-utils.js magical-titles.js llm.js ai-image-gen.js lucide-icons.js templates.js ./
 
 # Chromium's sandbox requires a non-root account AND host namespace support.
 # Do not replace this with root or --no-sandbox; see SAAS_SETUP.md's launch gate.

@@ -1,10 +1,65 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, access } from 'node:fs/promises';
+import { matchesGlob, posix } from 'node:path';
 import { ensurePrivateBucket, BUCKET_POLICY } from '../../deploy/ensure-storage.mjs';
 
 const root = new URL('../../', import.meta.url);
 const read = (file: string) => readFile(new URL(file, root), 'utf8');
+
+function htmlRuntimeAssets(html: string, documentPath: string) {
+  const assets = new Set<string>();
+  for (const [tag] of html.matchAll(/<(?:script|link)\b[^>]*>/gi)) {
+    const attributes = new Map([...tag.matchAll(/([\w-]+)\s*=\s*(["'])(.*?)\2/g)].map(match => [match[1].toLowerCase(), match[3]]));
+    const script = /^<script\b/i.test(tag);
+    if (!script && !attributes.get('rel')?.toLowerCase().split(/\s+/).includes('stylesheet')) continue;
+    const reference = attributes.get(script ? 'src' : 'href');
+    if (!reference) continue;
+    const url = new URL(reference, `https://appscreen.invalid/${documentPath}`);
+    if (url.origin === 'https://appscreen.invalid') assets.add(decodeURIComponent(url.pathname.slice(1)));
+  }
+  return [...assets];
+}
+
+// A focused lint for this repository's literal COPY paths and root-anchored
+// allowlist, not a substitute for building/running the image on the target host.
+function assertRuntimeAssetsPackaged(docker: string, ignore: string, assets: string[]) {
+  const copies = [...docker.replace(/\\\r?\n/g, ' ').matchAll(/^COPY\s+(.+)$/gm)].flatMap(match => {
+    const words = match[1].trim().split(/\s+/);
+    assert.ok(words.every(word => !word.startsWith('--') && !/["'\[\]*?]/.test(word)), 'Update the packaging lint before introducing non-literal COPY syntax.');
+    const destination = words.pop()!;
+    return words.map(source => ({ source: posix.normalize(source), directory: source.endsWith('/'), destination: posix.normalize(destination).replace(/\/$/, '') }));
+  });
+  const rules = ignore.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
+  const included = (path: string) => {
+    let allowed = true;
+    for (const rule of rules) {
+      const allow = rule.startsWith('!');
+      const pattern = (allow ? rule.slice(1) : rule).replace(/^\/+|\/+$/g, '');
+      if (matchesGlob(path, pattern)) allowed = allow;
+    }
+    return allowed;
+  };
+  for (const asset of assets) {
+    const copy = copies.find(item => {
+      const target = item.directory ? item.destination : posix.join(item.destination, posix.basename(item.source));
+      return item.directory ? asset.startsWith(`${target}/`) : asset === target;
+    });
+    assert.ok(copy, `SaaS image does not COPY runtime asset ${asset} to its expected path.`);
+    const source = copy.directory ? posix.join(copy.source, posix.relative(copy.destination, asset)) : copy.source;
+    const parts = source.split('/');
+    for (let length = 1; length <= parts.length; length++) {
+      const path = parts.slice(0, length).join('/');
+      assert.ok(included(path), `SaaS build context excludes runtime asset ${asset} at ${path}.`);
+    }
+  }
+}
+
+async function runtimePackagingInputs() {
+  const [docker, ignore, editor, shell] = await Promise.all([read('Dockerfile.saas'), read('Dockerfile.saas.dockerignore'), read('index.html'), read('saas/index.html')]);
+  const assets = [...new Set(['index.html', 'saas/index.html', ...htmlRuntimeAssets(editor, 'index.html'), ...htmlRuntimeAssets(shell, 'saas/index.html')])];
+  return { docker, ignore, assets };
+}
 
 test('SaaS image uses an immutable Node base, reviewed lockfile browser and a non-root sandbox gate', async () => {
   const [docker, lock, start, browser] = await Promise.all([read('Dockerfile.saas'), read('package-lock.json'), read('deploy/start.mjs'), read('deploy/verify-browser.mjs')]);
@@ -32,6 +87,29 @@ test('SaaS build context explicitly excludes local secrets and user data while e
   for (const line of docker.split('\n').filter(line => line.startsWith('COPY '))) {
     for (const source of line.trim().split(/\s+/).slice(1, -1)) await access(new URL(source, root));
   }
+});
+
+test('SaaS image packages every local editor and customer-shell script/stylesheet at its served path', async () => {
+  const { docker, ignore, assets } = await runtimePackagingInputs();
+  for (const required of ['font-library.js', 'app.js', 'styles.css', 'core/editor-bridge.mjs', 'saas/app.js', 'saas/styles.css']) assert.ok(assets.includes(required), required);
+  assertRuntimeAssetsPackaged(docker, ignore, assets);
+  for (const asset of assets) await access(new URL(asset, root));
+});
+
+test('runtime asset extraction ignores remote resources and keeps relative/absolute local URLs without cache queries', () => {
+  assert.deepEqual(htmlRuntimeAssets(`<script src="/font-library.js?v=2"></script><script src='app.js#v3'></script><link href="styles.css?v=1" rel="stylesheet"><link rel="preconnect" href="https://fonts.googleapis.com"><script src="https://cdn.example.com/lib.js"></script><script src="//cdn.example.com/lib.js"></script><script>inline()</script>`, 'saas/index.html'), ['font-library.js', 'saas/app.js', 'saas/styles.css']);
+});
+
+test('runtime packaging regression catches missing font COPY, context exclusions, and omitted/misplaced SaaS directory copies', async () => {
+  const { docker, ignore, assets } = await runtimePackagingInputs();
+  assertRuntimeAssetsPackaged(docker, ignore, assets);
+  assert.throws(() => assertRuntimeAssetsPackaged(docker.replace(/\bfont-library\.js\s+/g, ''), ignore, assets), /does not COPY runtime asset font-library\.js/);
+  assert.throws(() => assertRuntimeAssetsPackaged(docker, ignore.replace(/^!font-library\.js\r?\n/gm, ''), assets), /excludes runtime asset font-library\.js/);
+  assert.throws(() => assertRuntimeAssetsPackaged(docker, `${ignore}\nfont-library.js\n`, assets), /excludes runtime asset font-library\.js/);
+  assert.throws(() => assertRuntimeAssetsPackaged(docker, `${ignore}\nsaas/app.js\n`, assets), /excludes runtime asset saas\/app\.js/);
+  assert.throws(() => assertRuntimeAssetsPackaged(docker, ignore.replace(/^!saas\/\*\*\r?\n/gm, ''), assets), /excludes runtime asset saas\/index\.html/);
+  assert.throws(() => assertRuntimeAssetsPackaged(docker.replace(/^COPY saas\/ .*\r?\n/gm, ''), ignore, assets), /does not COPY runtime asset saas\/index\.html/);
+  assert.throws(() => assertRuntimeAssetsPackaged(docker.replace(/^COPY saas\/ \.\/saas\//m, 'COPY saas/ ./wrong-location/'), ignore, assets), /does not COPY runtime asset saas\/index\.html/);
 });
 
 test('Render blueprint has distinct web/worker processes, HTTP health only on web, and safe feature defaults', async () => {

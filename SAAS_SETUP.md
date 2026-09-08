@@ -1,6 +1,8 @@
 # AppScreen SaaS setup
 
-This is a deployment runbook, not a record of a production deployment. Existing static-site `Dockerfile` and Compose files remain unchanged. Use `Dockerfile.saas` and `deploy/render.yaml` for the hosted application.
+This is a deployment runbook, not a record of a production deployment. Existing static-site `Dockerfile` and Compose files remain unchanged. The hosted application uses `Dockerfile.saas`: choose the opt-in `docker-compose.saas.yml` for a reviewed Coolify/Compose target or `deploy/render.yaml` for Render. Do not deploy both by default.
+
+For the existing public domain, start with [the staged Coolify deployment guide](deploy/COOLIFY.md). It covers keeping the current editor online, required account/storage settings, verification and an approved cutover. Rebuilding the legacy static image does not deploy the SaaS landing/login pages. `npm run deploy:verify -- https://your-approved-host` checks the route/asset distinction without signing in or changing data; it does not replace account and export testing.
 
 ## Architecture and prerequisites
 
