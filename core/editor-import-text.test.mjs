@@ -164,7 +164,8 @@ test('cloud imports and cached reloads never auto-fetch fonts or icons from meta
     state: { cloudDocument: { id: 'cloud' } }, window: { location: { pathname: '/editor', search: '?project=cloud' } }, URLSearchParams,
     googleFonts: { system: [], loaded: new Set() }, AppScreenFontLibrary: { getFont: name => ({ name }) },
     getTextSettings: () => ({ headlineFont: "'Untrusted imported font', sans-serif" }),
-    loadGoogleFont: name => { fonts.push(name); return Promise.resolve(true); }, getLucideImage: name => { icons.push(name); return Promise.resolve({}); },
+    queueScreenshotFontPreview: screenshot => { fonts.push(screenshot.text.headlineFont.split("'")[1]); return Promise.resolve(true); },
+    getLucideImage: name => { icons.push(name); return Promise.resolve({}); },
     document: { getElementById: id => { if (!controls.has(id)) controls.set(id, { style: {} }); return controls.get(id); } },
     Image: class { constructor() { images.push(this); } }, updateCanvas() {}, console,
   };
@@ -187,7 +188,7 @@ test('cloud imports and cached reloads never auto-fetch fonts or icons from meta
   assert.equal(controls.get('preview').textContent, 'Untrusted imported font');
   assert.equal(controls.get('preview').style.fontFamily, "'Untrusted imported font', sans-serif");
   // The legacy editor retains its existing automatic provider behavior; explicit
-  // font-picker calls still call loadGoogleFont directly in either context.
+  // font-picker calls still load the chosen face directly in either context.
   context.window.location = { pathname: '/editor', search: '' };
   context.updateSingleFontPickerPreview('font', 'preview', 'headlineFont');
   context.reconstructElementImages([{ type: 'icon', iconName: 'activity' }]);

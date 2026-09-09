@@ -57,3 +57,15 @@ Avara's upstream project does not include a standalone license document. Its
 included notice therefore reproduces the distributed font's embedded attribution
 and the complete SIL OFL 1.1 terms, as identified by the publisher and project
 metadata. No font outlines, names or binary metadata were changed.
+
+## Fonts excluded from the picker
+
+Satoshi and General Sans are not bundled or fetched. Fontshare's ITF Free Font
+License Version 2.0 (17 August 2026), section 02, prohibits offering these fonts
+as selectable options in third-party SaaS design tools and template editors
+without separate authorization. Section 06 clarifies that API availability does
+not grant additional font-use rights. Existing project font values are left
+unchanged, but require choosing a supported font before export.
+
+- Current terms: https://www.fontshare.com/licenses/itf-ffl#limitations-of-usage
+- Official site source verified on 2026-09-08: https://www.fontshare.com/js/main.d962d2d8.js

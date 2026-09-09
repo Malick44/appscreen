@@ -34,7 +34,7 @@ function createLibrary({ stylesheet, fontLoad, document = true } = {}) {
     return { library: context.AppScreenFontLibrary, links, requests };
 }
 
-test('catalog contains 16 curated families from two providers and preserves legacy Fontshare fonts', () => {
+test('catalog contains 16 open-license curated families from two providers', () => {
     const { library, links } = createLibrary();
     const curated = library.fonts.filter(font => font.fancy);
     assert.equal(curated.length, 16);
@@ -52,10 +52,18 @@ test('catalog contains 16 curated families from two providers and preserves lega
         assert.equal(library.getFont(font.value), font);
         assert.equal(library.getFont(font.cssFamily), font);
     }
-    assert.match(library.getFont('Satoshi').stylesheet, /api\.fontshare\.com/);
-    assert.equal(library.getFont('General Sans').fancy, false);
+    assert.equal(library.fonts.length, 16);
     assert.equal(library.getFont('Bagnard').cssFamily, 'BagnardRegular');
     assert.equal(library.getFont('Avara').cssFamily, 'AvaraBold');
+});
+
+test('restricted legacy Fontshare entries cannot trigger provider requests', async () => {
+    const { library, links } = createLibrary();
+    for (const name of ['Satoshi', 'General Sans', 'satoshi', 'GENERAL SANS', '"Satoshi", sans-serif', "'General Sans', sans-serif"]) {
+        assert.equal(library.getFont(name), null);
+        assert.equal(await library.loadFont(name), false);
+    }
+    assert.equal(links.length, 0);
 });
 
 test('font lookup rejects URLs, CSS, control characters and non-family input', async () => {
@@ -144,6 +152,57 @@ test('unknown Google families retry regular-only CSS when their full-weight requ
     assert.equal(links[0].removed, true);
     assert.equal(links[1].removed, false);
     assert.equal(links[1].href, 'https://fonts.googleapis.com/css2?family=An+Older+Display+Face&display=swap');
+});
+
+test('non-curated Google families request the selected weights and real italic after loading regular', async () => {
+    const { library, links, requests } = createLibrary();
+    assert.equal(await library.loadFont('Lato', { weights: [400], sample: 'Regular' }), true);
+    assert.equal(await library.loadFont('Lato', { weights: [700], italic: true, sample: 'Größe' }), true);
+    assert.equal(links.length, 2);
+    assert.equal(links[0].href, 'https://fonts.googleapis.com/css2?family=Lato:wght@400&display=swap');
+    assert.equal(links[1].href, 'https://fonts.googleapis.com/css2?family=Lato:ital,wght@1,700&display=swap');
+    assert.deepEqual(requests.at(-1), { css: 'italic 700 16px "Lato"', sample: 'Größe' });
+    assert.equal(await library.loadFont('Lato', { weights: [700], italic: true, sample: 'Český' }), true);
+    assert.equal(links.length, 2, 'New localized text reuses only the matching stylesheet');
+    assert.equal(requests.at(-1).sample, 'Český');
+});
+
+test('concurrent non-curated styles keep distinct jobs and numerically ordered weight requests', async () => {
+    const { library, links, requests } = createLibrary();
+    const regular = library.loadFont('Lato', { weights: [700, '400', 700], sample: 'Regular' });
+    const italic = library.loadFont('Lato', { weights: [700], italic: true, sample: 'Italic' });
+    const localized = library.loadFont('Lato', { weights: [400, 700], sample: 'Français' });
+    assert.notEqual(regular, italic);
+    assert.equal(regular, localized);
+    assert.deepEqual(await Promise.all([regular, italic, localized]), [true, true, true]);
+    assert.equal(links.length, 2);
+    assert.equal(links[0].href, 'https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap');
+    assert.equal(links[1].href, 'https://fonts.googleapis.com/css2?family=Lato:ital,wght@1,700&display=swap');
+    assert.equal(requests.length, 5, 'Every style and localized sample is verified');
+    assert.equal(library.loading.size, 0);
+});
+
+test('an unavailable Google weight falls back to the real italic before normal synthesis', async () => {
+    const { library, links, requests } = createLibrary({ stylesheet: (link, count) => count === 1 ? link.onerror?.() : link.onload?.() });
+    assert.equal(await library.loadFont('A Single Weight Face', { weights: [700], italic: true }), true);
+    assert.equal(links.length, 2);
+    assert.equal(links[0].removed, true);
+    assert.equal(links[1].href, 'https://fonts.googleapis.com/css2?family=A+Single+Weight+Face:ital@1&display=swap');
+    assert.deepEqual(requests, [{ css: 'italic 700 16px "A Single Weight Face"', sample: 'BESbswy' }]);
+});
+
+test('a family remains loading while an earlier style request is still pending', async () => {
+    const releases = new Map();
+    const { library } = createLibrary({ fontLoad: (_css, sample) => new Promise(resolve => releases.set(sample, resolve)) });
+    const regular = library.loadFont('Lato', { weights: [400], sample: 'Regular' });
+    const italic = library.loadFont('Lato', { weights: [700], italic: true, sample: 'Italic' });
+    while (releases.size < 2) await new Promise(resolve => setTimeout(resolve, 0));
+    releases.get('Italic')([{}]);
+    assert.equal(await italic, true);
+    assert.equal(library.loading.get('Lato'), regular);
+    releases.get('Regular')([{}]);
+    assert.equal(await regular, true);
+    assert.equal(library.loading.size, 0);
 });
 
 test('failed stylesheets are removed, not marked loaded, and can be retried', async () => {

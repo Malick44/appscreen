@@ -23,9 +23,9 @@ function exportContext({ cloud = false, result = true } = {}) {
     state: { currentLanguage: 'de' },
     googleFonts: { system: [{ name: 'Georgia', value: 'Georgia, serif' }] },
     isCloudDocumentContext: () => cloud,
-    AppScreenFontLibrary: { loadFont(name, options) { requests.push({ name, options: plain(options) }); return Promise.resolve(result); } },
+    AppScreenFontLibrary: { getFont: name => ({ name }), loadFont(name, options) { requests.push({ name, options: plain(options) }); return Promise.resolve(result); } },
   };
-  runInNewContext(`${extract('getElementText')}\n${extract('prepareScreenshotFonts')}`, context);
+  runInNewContext(`${extract('getElementText')}\n${extract('getScreenshotFontRequests')}\n${extract('prepareScreenshotFonts')}`, context);
   return { context, requests };
 }
 
@@ -106,6 +106,90 @@ test('export rejects failed faces instead of silently saving fallback typography
   assert.match(extract('prepareScreenshotForExport'), /await prepareScreenshotFonts\(screenshot\)/);
 });
 
+test('unavailable saved font values remain intact and export explains how to recover without a network retry', async () => {
+  const { context, requests } = exportContext();
+  context.AppScreenFontLibrary.getFont = () => null;
+  const screenshot = { text: { headlineFont: '"Satoshi", sans-serif', headlines: { en: 'Saved copy' } } };
+  await assert.rejects(context.prepareScreenshotFonts(screenshot), /Satoshi is not available in this editor\. Choose another font before exporting\./);
+  assert.equal(screenshot.text.headlineFont, '"Satoshi", sans-serif');
+  assert.deepEqual(requests, []);
+});
+
+function previewContext(options) {
+  const fixture = exportContext(options);
+  const frames = [];
+  const redraws = [];
+  Object.assign(fixture.context, {
+    requestAnimationFrame: callback => { frames.push(callback); },
+    updateCanvas: options => { redraws.push(options); },
+  });
+  fixture.context.state.screenshots = [];
+  fixture.context.state.selectedIndex = 0;
+  runInNewContext(`const fontPreviewLoads = new Map(); let fontPreviewRedrawPending = false;\n${extract('queueScreenshotFontPreview')}`, fixture.context);
+  return { ...fixture, frames, redraws };
+}
+
+test('main and side preview requests restore unselected elements with their actual face and coalesce non-persisting redraws', async () => {
+  const { context, requests, frames, redraws } = previewContext();
+  const main = { text: { headlineFont: '"Instrument Serif", serif', headlineWeight: 400, headlineItalic: true,
+    currentHeadlineLang: 'fr', headlines: { fr: 'Élégance française' } },
+    elements: [{ type: 'text', font: '"BagnardRegular", serif', fontWeight: '700', italic: true, texts: { de: 'Größe & Gefühl', en: 'English' } }] };
+  const side = { text: { headlineFont: '"Syne", sans-serif', headlineWeight: 800, headlines: { en: 'Side preview' } } };
+  const offscreen = { text: { headlineFont: '"Caveat", cursive', headlines: { en: 'Must not fetch' } } };
+  context.state.screenshots = [main, side, offscreen];
+  await Promise.all([context.queueScreenshotFontPreview(main), context.queueScreenshotFontPreview(side), context.queueScreenshotFontPreview(main)]);
+  assert.deepEqual(requests, [
+    { name: 'Instrument Serif', options: { weights: [400], italic: true, sample: 'Élégance française' } },
+    { name: 'BagnardRegular', options: { weights: ['700'], italic: true, sample: 'Größe & Gefühl' } },
+    { name: 'Syne', options: { weights: [800], italic: false, sample: 'Side preview' } },
+  ]);
+  assert.equal(frames.length, 1, 'Concurrent face loads should request one canvas redraw');
+  frames.shift()();
+  assert.deepEqual(plain(redraws), [{ persist: false }]);
+  await Promise.all([context.queueScreenshotFontPreview(main), context.queueScreenshotFontPreview(side)]);
+  assert.equal(requests.length, 3, 'A redraw does not reload the same face signatures');
+  assert.equal(frames.length, 0);
+  context.state.currentLanguage = 'en';
+  main.elements[0].fontWeight = 400;
+  main.elements[0].italic = false;
+  await context.queueScreenshotFontPreview(main);
+  assert.deepEqual(requests.at(-1), { name: 'BagnardRegular', options: { weights: [400], italic: false, sample: 'English' } });
+  assert.equal(requests.length, 4, 'Only the changed text/style signature loads again');
+  assert.match(extract('updateCanvas'), /queueScreenshotFontPreview\(state\.screenshots\[state\.selectedIndex\]/);
+  assert.match(extract('renderScreenshotToCanvas'), /queueScreenshotFontPreview\(screenshot\)/);
+});
+
+test('failed preview faces are caught and cached without retry loops; strict export can retry independently', async () => {
+  const { context, requests, frames } = previewContext();
+  context.AppScreenFontLibrary.loadFont = (name, options) => {
+    requests.push({ name, options: plain(options) });
+    return Promise.reject(new Error('Temporary provider outage'));
+  };
+  const scene = { text: { headlineFont: '"Instrument Serif", serif', headlines: { en: 'Retry explicitly' } } };
+  assert.equal(await context.queueScreenshotFontPreview(scene), false);
+  assert.equal(await context.queueScreenshotFontPreview(scene), false);
+  assert.equal(requests.length, 1);
+  assert.equal(frames.length, 0);
+  await assert.rejects(context.prepareScreenshotFonts(scene), /Temporary provider outage/);
+  assert.equal(requests.length, 2, 'Export must not trust or reuse a failed preview result');
+  context.isCloudDocumentContext = () => true;
+  scene.text.headlines.en = 'Different cloud content';
+  await context.queueScreenshotFontPreview(scene);
+  assert.equal(requests.length, 2, 'Cloud metadata never starts automatic preview requests');
+});
+
+test('picker selection loads the actual target weight, italic style and selected-language text', () => {
+  const context = { state: { currentLanguage: 'ja' },
+    getTextSettings: () => ({ headlineWeight: 600, headlineItalic: true, currentHeadlineLang: 'fr', headlines: { fr: 'Le détail' },
+      subheadlineWeight: 300, currentSubheadlineLang: 'de', subheadlines: { de: 'Noch mehr' } }),
+    getSelectedElement: () => ({ fontWeight: '800', italic: true, texts: { ja: '日本語', en: 'English' } }),
+  };
+  runInNewContext(`${extract('getElementText')}\n${extract('getFontPickerLoadOptions')}`, context);
+  assert.deepEqual(plain(context.getFontPickerLoadOptions('headline')), { weights: [600], italic: true, sample: 'Le détail' });
+  assert.deepEqual(plain(context.getFontPickerLoadOptions('subheadline')), { weights: [300], italic: false, sample: 'Noch mehr' });
+  assert.deepEqual(plain(context.getFontPickerLoadOptions('element')), { weights: ['800'], italic: true, sample: '日本語' });
+});
+
 test('font picker preview restores single and double quoted provider aliases without metadata fetches in cloud', async () => {
   const controls = new Map();
   const requests = [];
@@ -113,7 +197,10 @@ test('font picker preview restores single and double quoted provider aliases wit
     googleFonts: { system: [], loaded: new Set() },
     AppScreenFontLibrary: { getFont: name => ({ name: name === 'BagnardRegular' ? 'Bagnard' : name }) },
     document: { getElementById: id => { if (!controls.has(id)) controls.set(id, { style: {} }); return controls.get(id); } },
-    isCloudDocumentContext: () => false, loadGoogleFont: name => { requests.push(name); return Promise.resolve(true); },
+    isCloudDocumentContext: () => false, queueScreenshotFontPreview: screenshot => {
+      const family = (screenshot.text?.headlineFont || screenshot.elements?.[0].font).split(',')[0].replace(/['"]/g, '');
+      requests.push(context.AppScreenFontLibrary.getFont(family).name); return Promise.resolve(true);
+    },
     getTextSettings: () => ({ headlineFont: '"BagnardRegular", serif' }), updateCanvas() {},
   };
   runInNewContext(`${extract('updateSingleFontPickerPreview')}\n${extract('updateElementFontPickerPreview')}`, context);
@@ -168,7 +255,7 @@ test('all three real font pickers default to Fancy and catalog options support p
         preview: 'font-picker-preview', stateKey: 'headlineFont' },
     });
   });
-  await page.addScriptTag({ content: `${extract('loadGoogleFont')}\n${extract('renderFontList')}` });
+  await page.addScriptTag({ content: `${extract('loadGoogleFont')}\n${extract('getFontPickerLoadOptions')}\n${extract('renderFontList')}` });
   await page.evaluate(() => renderFontList('headline', pickerIds));
 
   await t.test('Fancy contains Google and independent faces without provider requests at startup', async () => {
@@ -188,12 +275,13 @@ test('all three real font pickers default to Fancy and catalog options support p
     assert.equal(await page.locator('.font-picker-empty').textContent(), 'No fonts found');
   });
 
-  await t.test('All deduplicates curated Google entries and Popular retains actual provider descriptors', async () => {
+  await t.test('All deduplicates curated Google entries and Popular omits unsupported provider fonts', async () => {
     await page.evaluate(() => { fontPickerState.headline.category = 'all'; fontPickerState.headline.search = ''; return renderFontList('headline', pickerIds); });
     assert.equal(await page.locator('.font-option[data-font-name="Syne"]').count(), 1);
     await page.evaluate(() => { fontPickerState.headline.category = 'popular'; return renderFontList('headline', pickerIds); });
-    assert.equal(await page.locator('.font-option[data-font-name="Satoshi"]').getAttribute('data-font-category'), 'fontshare');
-    assert.equal(await page.locator('.font-option[data-font-name="General Sans"]').getAttribute('data-font-category'), 'fontshare');
+    assert.equal(await page.locator('.font-option[data-font-name="Satoshi"]').count(), 0);
+    assert.equal(await page.locator('.font-option[data-font-name="General Sans"]').count(), 0);
+    assert.equal(await page.locator('.font-option[data-font-name="Playfair Display"]').getAttribute('data-font-category'), 'google');
   });
 
   await t.test('failed download leaves document unchanged, exposes retry, and success selects a loaded face', async () => {
@@ -216,7 +304,7 @@ test('all three real font pickers default to Fancy and catalog options support p
     assert.equal(await page.evaluate(() => updateCount), 1);
     assert.equal(await page.locator('#font-picker-dropdown.open').count(), 0);
     const lastRequest = await page.evaluate(() => requests.at(-1));
-    assert.deepEqual(lastRequest, { name: 'Bagnard', options: { weights: [400, 700, 400] } });
+    assert.deepEqual(lastRequest, { name: 'Bagnard', options: { weights: [700], italic: false, sample: 'BESbswy' } });
   });
 
   await t.test('late loads cannot overwrite a newer choice or a different screenshot', async () => {

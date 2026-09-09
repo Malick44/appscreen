@@ -34,18 +34,6 @@
         independent('Trickster', 'TricksterRegular', 'trickster', 'Playful display', 'fantasy'),
         independent('Cotham Sans', 'CothamSansRegular', 'cotham', 'Independent sans', 'sans-serif'),
         independent('Avara', 'AvaraBold', 'avara', 'Sculptural serif', 'serif'),
-        {
-            name: 'Satoshi', cssFamily: 'Satoshi', value: '"Satoshi", sans-serif',
-            provider: 'fontshare', style: 'Modern sans', weights: range(300, 900), fancy: false,
-            stylesheet: 'https://api.fontshare.com/v2/css?f[]=satoshi@1&display=swap',
-            source: 'https://www.fontshare.com/fonts/satoshi', license: 'https://www.fontshare.com/licenses/itf-ffl',
-        },
-        {
-            name: 'General Sans', cssFamily: 'General Sans', value: '"General Sans", sans-serif',
-            provider: 'fontshare', style: 'Modern sans', weights: range(200, 700), fancy: false,
-            stylesheet: 'https://api.fontshare.com/v2/css?f[]=general-sans@1&display=swap',
-            source: 'https://www.fontshare.com/fonts/general-sans', license: 'https://www.fontshare.com/licenses/itf-ffl',
-        },
     ];
     fonts.forEach(font => { Object.freeze(font.weights); Object.freeze(font); });
     Object.freeze(fonts);
@@ -60,6 +48,10 @@
     function getFont(name) {
         if (typeof name !== 'string') return null;
         const family = name.trim();
+        // Fontshare FFL v2 prohibits selectable fonts in third-party design tools.
+        // Preserve saved CSS strings, but never fetch these legacy picker entries.
+        const primaryFamily = family.split(',')[0].replace(/^[\s'"]+|[\s'"]+$/g, '').toLowerCase();
+        if (['satoshi', 'general sans'].includes(primaryFamily)) return null;
         const catalogFont = aliases.get(family.toLowerCase());
         if (catalogFont) return catalogFont;
         // Family names only: never interpolate URLs, CSS declarations or control characters.
@@ -98,7 +90,7 @@
 
     function makeRequest(options) {
         const requestedWeights = Array.isArray(options.weights) ? options.weights : [400, 700];
-        const weights = [...new Set(requestedWeights.map(Number).filter(weight => Number.isFinite(weight) && weight >= 1 && weight <= 1000))];
+        const weights = [...new Set(requestedWeights.map(Number).filter(weight => Number.isFinite(weight) && weight >= 1 && weight <= 1000))].sort((a, b) => a - b);
         const sample = typeof options.sample === 'string' && options.sample.trim() ? options.sample : 'BESbswy';
         return { weights: weights.length ? weights : [400], italic: options.italic === true, sample };
     }
@@ -123,7 +115,11 @@
         const doc = root.document;
         if (!font || !doc?.head || typeof doc?.fonts?.load !== 'function') return Promise.resolve(false);
         const request = makeRequest(options || {});
-        const current = jobs.get(font.name);
+        // Families outside the curated catalog have no known axis inventory.
+        // Request the selected face, and keep its CSS separate from an earlier
+        // regular load so available bold/italic faces are not synthesized.
+        const jobKey = font.unknown ? JSON.stringify([font.name, request.weights, request.italic]) : font.name;
+        const current = jobs.get(jobKey);
         if (current?.accepting) {
             current.requests.push(request);
             return current.promise;
@@ -131,17 +127,25 @@
 
         const milliseconds = Number(options?.timeout);
         const deadline = Date.now() + (Number.isFinite(milliseconds) && milliseconds > 0 ? Math.min(milliseconds, 30000) : 8000);
-        const job = { accepting: true, requests: [request], promise: null };
+        const job = { family: font.name, accepting: true, requests: [request], promise: null };
         const work = Promise.resolve().then(async () => {
-            let link = stylesheets.get(font.name);
+            let link = stylesheets.get(jobKey);
             const existingLink = link;
-            const urls = [font.stylesheet];
-            if (font.unknown) urls.push(`https://fonts.googleapis.com/css2?family=${encodeURIComponent(font.cssFamily).replace(/%20/g, '+')}&display=swap`);
+            let urls = [font.stylesheet];
+            if (font.unknown) {
+                const base = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(font.cssFamily).replace(/%20/g, '+')}`;
+                const axes = request.italic ? `ital,wght@${request.weights.map(weight => `1,${weight}`).join(';')}` : `wght@${request.weights.join(';')}`;
+                urls = [`${base}:${axes}&display=swap`];
+                // Preserve the editor's existing synthetic-weight behavior for
+                // single-style families, preferring a real italic when present.
+                if (request.italic) urls.push(`${base}:ital@1&display=swap`);
+                urls.push(`${base}&display=swap`);
+            }
             for (const href of urls) {
                 try {
                     if (!link) link = await requestStylesheet(doc, href, deadline - Date.now());
                     await verifyRequests(doc, font, job, deadline);
-                    stylesheets.set(font.name, link);
+                    stylesheets.set(jobKey, link);
                     loaded.add(font.name);
                     job.accepting = false;
                     return true;
@@ -155,12 +159,14 @@
             return false;
         });
         job.promise = work.catch(() => { job.accepting = false; return false; }).finally(() => {
-            if (jobs.get(font.name) === job) {
-                jobs.delete(font.name);
-                loading.delete(font.name);
+            if (jobs.get(jobKey) === job) jobs.delete(jobKey);
+            if (loading.get(font.name) === job.promise) {
+                const pending = [...jobs.values()].find(other => other.family === font.name);
+                if (pending) loading.set(font.name, pending.promise);
+                else loading.delete(font.name);
             }
         });
-        jobs.set(font.name, job);
+        jobs.set(jobKey, job);
         loading.set(font.name, job.promise);
         return job.promise;
     }

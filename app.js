@@ -2381,7 +2381,7 @@ const googleFonts = {
         'Nunito', 'Playfair Display', 'Oswald', 'Merriweather', 'Source Sans Pro',
         'PT Sans', 'Ubuntu', 'Rubik', 'Work Sans', 'Quicksand', 'Mulish', 'Barlow',
         'DM Sans', 'Manrope', 'Space Grotesk', 'Plus Jakarta Sans', 'Outfit', 'Sora',
-        'Lexend', 'Figtree', 'Albert Sans', 'Urbanist', 'Satoshi', 'General Sans',
+        'Lexend', 'Figtree', 'Albert Sans', 'Urbanist',
         'Bebas Neue', 'Anton', 'Archivo', 'Bitter', 'Cabin', 'Crimson Text',
         'Dancing Script', 'Fira Sans', 'Heebo', 'IBM Plex Sans', 'Josefin Sans',
         'Karla', 'Libre Franklin', 'Lora', 'Noto Sans', 'Nunito Sans', 'Pacifico',
@@ -2416,11 +2416,66 @@ const googleFonts = {
 };
 
 // Keep the legacy entry point for saved projects and existing picker callers.
-async function loadGoogleFont(fontName) {
+async function loadGoogleFont(fontName, options) {
     if (googleFonts.system.some(font => font.name === fontName)) return true;
     const text = getTextSettings();
-    return AppScreenFontLibrary.loadFont(fontName, {
+    return AppScreenFontLibrary.loadFont(fontName, options || {
         weights: [400, text.headlineWeight || 600, text.subheadlineWeight || 400]
+    });
+}
+
+function getFontPickerLoadOptions(pickerId) {
+    if (pickerId === 'element') {
+        const element = getSelectedElement() || {};
+        return { weights: [element.fontWeight || 400], italic: Boolean(element.italic), sample: getElementText(element) || 'BESbswy' };
+    }
+    const text = getTextSettings();
+    const prefix = pickerId === 'subheadline' ? 'subheadline' : 'headline';
+    const lang = text[`current${prefix === 'headline' ? 'Headline' : 'Subheadline'}Lang`] || 'en';
+    return { weights: [text[`${prefix}Weight`] || 400], italic: Boolean(text[`${prefix}Italic`]), sample: text[`${prefix}s`]?.[lang] || 'BESbswy' };
+}
+
+// Font requests are keyed by actual rendered content, not just the family. A
+// loaded Latin regular face does not mean its italic/localized face is ready.
+const fontPreviewLoads = new Map();
+let fontPreviewRedrawPending = false;
+
+function queueScreenshotFontPreview(screenshot) {
+    if (isCloudDocumentContext() || !screenshot) return Promise.resolve(false);
+    const pending = [];
+    for (const request of getScreenshotFontRequests(screenshot)) {
+        const signature = JSON.stringify([request.name, request.options]);
+        if (fontPreviewLoads.has(signature)) continue;
+        const entry = { status: 'loading' };
+        fontPreviewLoads.set(signature, entry);
+        const work = Promise.resolve()
+            .then(() => AppScreenFontLibrary.loadFont(request.name, request.options))
+            .then(loaded => { entry.status = loaded ? 'loaded' : 'failed'; return Boolean(loaded); }, () => { entry.status = 'failed'; return false; });
+        pending.push(work);
+    }
+    if (!pending.length) return Promise.resolve(false);
+    return Promise.all(pending).then(results => {
+        const changed = results.some(Boolean);
+        if (changed && !isCloudDocumentContext() && !fontPreviewRedrawPending) {
+            fontPreviewRedrawPending = true;
+            requestAnimationFrame(() => {
+                fontPreviewRedrawPending = false;
+                if (!isCloudDocumentContext()) updateCanvas({ persist: false });
+            });
+        }
+        // Bound edit-history memory without evicting a face still on screen:
+        // that would retrigger loads on every redraw in a dense campaign.
+        if (fontPreviewLoads.size > 512) {
+            const visibleSignatures = new Set(state.screenshots
+                .slice(Math.max(0, state.selectedIndex - 2), state.selectedIndex + 3)
+                .flatMap(getScreenshotFontRequests)
+                .map(request => JSON.stringify([request.name, request.options])));
+            for (const [signature, entry] of fontPreviewLoads) {
+                if (fontPreviewLoads.size <= 512) break;
+                if (entry.status !== 'loading' && !visibleSignatures.has(signature)) fontPreviewLoads.delete(signature);
+            }
+        }
+        return changed;
     });
 }
 
@@ -2861,7 +2916,7 @@ async function renderFontList(pickerId, ids) {
 
     const previewFont = async option => {
         if (option.dataset.fontCategory === 'system') return true;
-        const loaded = await loadGoogleFont(option.dataset.fontName);
+        const loaded = await loadGoogleFont(option.dataset.fontName, getFontPickerLoadOptions(pickerId));
         if (option.isConnected) {
             if (loaded) option.querySelector('.font-option-name').style.fontFamily = option.dataset.fontValue;
             const status = option.querySelector('.font-option-category');
@@ -2990,8 +3045,7 @@ function updateSingleFontPickerPreview(hiddenId, previewId, stateKey) {
         if (family) {
             fontName = AppScreenFontLibrary.getFont(family)?.name || family;
             if (!isCloudDocumentContext()) {
-                const wasLoaded = googleFonts.loaded.has(fontName);
-                loadGoogleFont(fontName).then(loaded => { if (loaded && !wasLoaded) updateCanvas(); });
+                queueScreenshotFontPreview({ text });
             }
         }
     }
@@ -3019,8 +3073,7 @@ function updateElementFontPickerPreview(el) {
         if (family) {
             fontName = AppScreenFontLibrary.getFont(family)?.name || family;
             if (!isCloudDocumentContext()) {
-                const wasLoaded = googleFonts.loaded.has(fontName);
-                loadGoogleFont(fontName).then(loaded => { if (loaded && !wasLoaded) updateCanvas(); });
+                queueScreenshotFontPreview({ elements: [el] });
             }
         }
     }
@@ -9689,6 +9742,7 @@ function getCanvasDimensions() {
 function updateCanvas(options = {}) {
     updateProofingMeta();
     if (options.persist !== false) saveState(); // Persist state on every committed update
+    queueScreenshotFontPreview(state.screenshots[state.selectedIndex] || { text: getTextSettings(), elements: getElements() });
     const dims = getCanvasDimensions();
     canvas.width = dims.width;
     canvas.height = dims.height;
@@ -9969,6 +10023,7 @@ function slideToScreenshot(newIndex, direction) {
 function renderScreenshotToCanvas(index, targetCanvas, targetCtx, dims, previewScale) {
     const screenshot = state.screenshots[index];
     if (!screenshot) return;
+    queueScreenshotFontPreview(screenshot);
 
     // Get localized image for current language
     const img = getScreenshotImage(screenshot);
@@ -11259,20 +11314,15 @@ function waitForPhoneModel(deviceType = 'iphone', timeoutMs = 12000) {
     ]).finally(() => clearTimeout(timeout));
 }
 
-async function prepareScreenshotFonts(screenshot) {
-    // Cloud rendering has its own offline font policy; do not fetch providers
-    // from imported cloud metadata.
-    if (isCloudDocumentContext()) return;
+function getScreenshotFontRequests(screenshot) {
     const text = screenshot.text || {};
     const requests = [];
     const addFont = (value, weight, italic, sample) => {
-        if (!value || !sample || googleFonts.system.some(font => font.value === value)) return;
+        if (typeof value !== 'string' || typeof sample !== 'string' || !value || !sample || googleFonts.system.some(font => font.value === value)) return;
         const family = value.split(',')[0].replace(/^[\s'"]+|[\s'"]+$/g, '');
         if (googleFonts.system.some(font => font.name === family)) return;
         if (['sans-serif', 'serif', 'monospace', 'cursive', 'fantasy', 'system-ui', '-apple-system', 'AppScreen Sans'].includes(family)) return;
-        requests.push(AppScreenFontLibrary.loadFont(family, { weights: [weight || 400], italic: Boolean(italic), sample }).then(loaded => {
-            if (!loaded) throw new Error(`${family} could not load. Check your connection and retry the export.`);
-        }));
+        requests.push({ name: family, options: { weights: [weight || 400], italic: Boolean(italic), sample } });
     };
     for (const prefix of ['headline', 'subheadline']) {
         if (text[`${prefix}Enabled`] === false || (prefix === 'subheadline' && !text.subheadlineEnabled)) continue;
@@ -11284,7 +11334,20 @@ async function prepareScreenshotFonts(screenshot) {
             addFont(element.font, element.fontWeight, element.italic, getElementText(element));
         }
     }
-    await Promise.all(requests);
+    return requests;
+}
+
+async function prepareScreenshotFonts(screenshot) {
+    // Cloud rendering has its own offline font policy; do not fetch providers
+    // from imported cloud metadata. Exports revalidate even a failed preview.
+    if (isCloudDocumentContext()) return;
+    await Promise.all(getScreenshotFontRequests(screenshot).map(async request => {
+        if (!AppScreenFontLibrary.getFont(request.name)) {
+            throw new Error(`${request.name} is not available in this editor. Choose another font before exporting.`);
+        }
+        const loaded = await AppScreenFontLibrary.loadFont(request.name, request.options);
+        if (!loaded) throw new Error(`${request.name} could not load. Check your connection and retry the export.`);
+    }));
 }
 
 async function prepareScreenshotForExport(index) {
