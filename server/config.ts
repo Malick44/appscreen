@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveStorageConfig } from '../deploy/storage-config.mjs';
 
 export const rootDirectory = resolve(fileURLToPath(new URL('..', import.meta.url)));
 function localSigningSecret() {
@@ -26,6 +27,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   const supabaseUrl = env.SUPABASE_URL || '';
   const supabasePublishableKey = env.SUPABASE_PUBLISHABLE_KEY || '';
   const supabaseServiceKey = env.SUPABASE_SERVICE_ROLE_KEY || '';
+  const supabaseStorageUrl = env.SUPABASE_STORAGE_URL || '';
+  const supabaseStorageServiceKey = env.SUPABASE_STORAGE_SERVICE_ROLE_KEY || '';
   const supabaseAuthVerification = env.SUPABASE_AUTH_VERIFICATION ?? 'jwks';
   if (!['jwks', 'auth-server'].includes(supabaseAuthVerification)) throw new Error('SUPABASE_AUTH_VERIFICATION must be jwks or auth-server.');
   if (supabaseAuthVerification === 'auth-server') {
@@ -48,12 +51,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   if (!databaseUrl) throw new Error('DATABASE_URL is required. See .env.saas.example and SAAS_SETUP.md.');
   if (production && (signingSecret.length < 48 || !baseUrl.startsWith('https://'))) throw new Error('Production requires HTTPS APP_BASE_URL and a strong APPSCREEN_SIGNING_SECRET.');
   if (!developmentAuth && (!supabaseUrl || !supabasePublishableKey)) throw new Error('Configure Supabase authentication, or explicitly enable APPSCREEN_DEV_AUTH for localhost development.');
-  if (production && !supabaseServiceKey) throw new Error('Production private storage requires SUPABASE_SERVICE_ROLE_KEY.');
+  resolveStorageConfig(env);
   if(mcpOAuthEnabled&&(developmentAuth||!supabaseUrl||!supabasePublishableKey))throw new Error('MCP OAuth requires configured Supabase Auth, not development sign-in.');
   if(production&&supabaseUrl&&!supabaseUrl.startsWith('https://'))throw new Error('Production Supabase must use HTTPS.');
   return {
     production, developmentAuth, port, host: developmentAuth ? '127.0.0.1' : (env.HOST || '0.0.0.0'), baseUrl,
     signingSecret, databaseUrl, supabaseUrl, supabasePublishableKey, supabaseServiceKey, supabaseAuthVerification,
+    supabaseStorageUrl, supabaseStorageServiceKey,
     mcpOAuthEnabled,mcpResource:new URL('/mcp',baseUrl).href,operatorUserIds,
     emailEnabled,emailFrom,resendKey,resendWebhookSecret,
     storageBucket: env.SUPABASE_STORAGE_BUCKET || 'appscreen-private',

@@ -3,9 +3,19 @@ import { dirname, resolve, sep } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import type { Config } from './config.js';
 import { invariant } from './errors.js';
+import { resolveStorageConfig } from '../deploy/storage-config.mjs';
 
 export function createStorage(config: Config) {
-  const cloud = config.supabaseServiceKey ? createClient(config.supabaseUrl,config.supabaseServiceKey,{auth:{persistSession:false,autoRefreshToken:false}}) : null;
+  const { url, key } = resolveStorageConfig({
+    NODE_ENV: config.production ? 'production' : 'development',
+    SUPABASE_URL: config.supabaseUrl, SUPABASE_SERVICE_ROLE_KEY: config.supabaseServiceKey,
+    SUPABASE_STORAGE_URL: config.supabaseStorageUrl, SUPABASE_STORAGE_SERVICE_ROLE_KEY: config.supabaseStorageServiceKey,
+  });
+  const cloud = key ? createClient(url,key,{
+    auth:{persistSession:false,autoRefreshToken:false},
+    // Custom apikey headers must never follow redirects to another installation.
+    global:{fetch:(input,options)=>fetch(input,{...options,redirect:'error'})},
+  }) : null;
   function localPath(key: string) {
     invariant(/^[a-zA-Z0-9_./-]+$/.test(key),'INVALID_STORAGE_KEY','Invalid file reference.');
     const path=resolve(config.localStorageDirectory,key);

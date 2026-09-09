@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { resolveStorageConfig } from './storage-config.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 // Config expansion only: no daemon/build/start, dotenv, actual keys or database.
@@ -70,8 +71,8 @@ test('SaaS Compose passes an explicit self-hosted verification mode to both proc
   }
 });
 
-test('SaaS Compose refuses unset or empty production settings before any deployment', options, () => {
-  for (const setting of ['APP_BASE_URL', 'DATABASE_URL', 'APPSCREEN_SIGNING_SECRET', 'SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_SERVICE_ROLE_KEY']) {
+test('SaaS Compose refuses unset or empty mandatory production settings before any deployment', options, () => {
+  for (const setting of ['APP_BASE_URL', 'DATABASE_URL', 'APPSCREEN_SIGNING_SECRET', 'SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY']) {
     for (const value of [undefined, '']) {
       const env = { ...fixture, [setting]: value };
       if (value === undefined) delete env[setting];
@@ -80,5 +81,30 @@ test('SaaS Compose refuses unset or empty production settings before any deploym
       assert.ok(result.stderr.includes(setting), `Missing ${setting} should be explained`);
       assert.equal(result.stdout.trim(), '');
     }
+  }
+});
+
+test('SaaS Compose keeps isolated Auth and shared Storage credentials distinct', options, () => {
+  const result = inspect({ ...fixture, SUPABASE_SERVICE_ROLE_KEY: '', SUPABASE_STORAGE_URL: 'https://storage.example.test', SUPABASE_STORAGE_SERVICE_ROLE_KEY: 'fixture-storage-only' });
+  assert.equal(result.status, 0, result.stderr);
+  const { services } = JSON.parse(result.stdout);
+  for (const { environment: env } of Object.values(services)) {
+    assert.equal(env.SUPABASE_URL, fixture.SUPABASE_URL);
+    assert.equal(env.SUPABASE_PUBLISHABLE_KEY, fixture.SUPABASE_PUBLISHABLE_KEY);
+    assert.equal(env.SUPABASE_SERVICE_ROLE_KEY, '');
+    assert.deepEqual(resolveStorageConfig(env), { url: 'https://storage.example.test', key: 'fixture-storage-only' });
+  }
+});
+
+test('SaaS expanded settings reject absent or partial Storage credentials at startup', options, () => {
+  for (const overrides of [
+    { SUPABASE_SERVICE_ROLE_KEY: '' },
+    { SUPABASE_STORAGE_URL: 'https://storage.example.test' },
+    { SUPABASE_STORAGE_SERVICE_ROLE_KEY: 'fixture-storage-only' },
+  ]) {
+    const result = inspect({ ...fixture, ...overrides });
+    assert.equal(result.status, 0, result.stderr);
+    const { services } = JSON.parse(result.stdout);
+    for (const { environment: env } of Object.values(services)) assert.throws(() => resolveStorageConfig(env), /Private storage requires|together/);
   }
 });

@@ -11,9 +11,14 @@ x-appscreen-environment: &appscreen-environment
   APP_BASE_URL: ${APP_BASE_URL:?Set the exact public HTTPS origin}
   DATABASE_URL: ${DATABASE_URL:?Set the intended PostgreSQL connection}
   APPSCREEN_SIGNING_SECRET: ${APPSCREEN_SIGNING_SECRET:?Set one shared strong signing secret}
-  SUPABASE_URL: ${SUPABASE_URL:?Set the intended Supabase project URL}
+  SUPABASE_URL: ${SUPABASE_URL:?Set the intended Auth gateway origin}
   SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:?Set the Supabase publishable key}
-  SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?Set the server-only storage key}
+  # Legacy single-project deployments use this key for both Auth admin and Storage.
+  # Split deployments can leave it empty while service email is disabled.
+  SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+  # Both overrides or neither: startup rejects a partial pair before networking.
+  SUPABASE_STORAGE_URL: ${SUPABASE_STORAGE_URL:-}
+  SUPABASE_STORAGE_SERVICE_ROLE_KEY: ${SUPABASE_STORAGE_SERVICE_ROLE_KEY:-}
   SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-appscreen-private}
   SUPABASE_AUTH_VERIFICATION: ${SUPABASE_AUTH_VERIFICATION:-jwks}
   APPSCREEN_DEV_AUTH: 'false'

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { pathToFileURL } from 'node:url';
+import { resolveStorageConfig } from './storage-config.mjs';
 
 export const BUCKET_POLICY = Object.freeze({ public: false, allowedMimeTypes: ['image/png', 'image/jpeg', 'application/zip'], fileSizeLimit: 524_288_000 });
 
@@ -21,11 +22,14 @@ export async function ensurePrivateBucket(storage, name, { create = false } = {}
   return { name, created: false, private: true };
 }
 
-export async function verifyConfiguredStorage({ create = false } = {}) {
-  const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url?.startsWith('https://') || !key) throw new Error('Provide runtime SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
-  const client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-  const result = await ensurePrivateBucket(client.storage, process.env.SUPABASE_STORAGE_BUCKET || 'appscreen-private', { create });
+export async function verifyConfiguredStorage({ create = false, env = process.env } = {}) {
+  const { url, key } = resolveStorageConfig(env, { requireConfigured: true });
+  const client = createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    // Custom apikey headers must never follow redirects to another installation.
+    global: { fetch: (input, options) => fetch(input, { ...options, redirect: 'error' }) },
+  });
+  const result = await ensurePrivateBucket(client.storage, env.SUPABASE_STORAGE_BUCKET || 'appscreen-private', { create });
   console.log(`Private storage verified: ${result.name}${result.created ? ' (created)' : ''}.`);
   return result;
 }
