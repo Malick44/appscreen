@@ -15,6 +15,7 @@ x-appscreen-environment: &appscreen-environment
   SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:?Set the Supabase publishable key}
   SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?Set the server-only storage key}
   SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-appscreen-private}
+  SUPABASE_AUTH_VERIFICATION: ${SUPABASE_AUTH_VERIFICATION:-jwks}
   APPSCREEN_DEV_AUTH: 'false'
   APPSCREEN_EMBEDDED_WORKER: 'false'
   APPSCREEN_ENABLE_AI: 'false'

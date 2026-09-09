@@ -1,6 +1,6 @@
 # AppScreen SaaS on the existing host
 
-Preparation only. No Coolify resource, Supabase project, DNS route, secret or production database was changed by adding these files. The Coolify dashboard was inspected on 2026-09-08: `appscreen` runs on `luma-dock`, uses `/Dockerfile` with port 80, and its latest successful deployment is commit `75b182b`. Confirm the intended Supabase project before using this runbook.
+Preparation only. No Coolify resource, Supabase project, DNS route, secret or production database was changed by adding these files. The Coolify dashboard was inspected on 2026-09-08: `appscreen` runs on `luma-dock`, uses `/Dockerfile` with port 80, and its latest successful deployment is commit `75b182b`. The existing self-hosted Supabase is already used by another application; follow [the self-hosted assessment](SELF_HOSTED_SUPABASE.md) before provisioning AppScreen's isolated backend.
 
 ## What changes at the public address
 
@@ -34,7 +34,7 @@ Both processes share one runtime configuration. The initial Compose file hard-di
 | `SUPABASE_PUBLISHABLE_KEY` | Matching public Auth key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Matching server-only private-storage key |
 
-The same file supplies shared quota defaults and the private bucket name. Review them for your policy; they are not a paid pricing plan. Configure real Supabase Auth Site URL, exact confirmation/recovery callbacks, asymmetric signing keys and auth email delivery as described in [SAAS_SETUP.md](../SAAS_SETUP.md). Production cannot use the localhost demo account. Use a separate deployment database credential for migrations where appropriate; do not put its elevated privileges into the long-running services.
+The same file supplies shared quota defaults, the private bucket name and `SUPABASE_AUTH_VERIFICATION` (default `jwks`). Review them for your policy; they are not a paid pricing plan. Configure real Supabase Auth Site URL, exact confirmation/recovery callbacks, token verification and auth email delivery as described in [SAAS_SETUP.md](../SAAS_SETUP.md). If the intended isolated self-hosted instance issues HS256 browser tokens without public signing keys, explicitly choose `auth-server`; this does not enable MCP OAuth or weaken the default verifier. Production cannot use the localhost demo account. Use a separate deployment database credential for migrations where appropriate; do not put its elevated privileges into the long-running services.
 
 ## Build, initialize and verify
 

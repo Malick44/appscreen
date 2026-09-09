@@ -26,7 +26,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   const supabaseUrl = env.SUPABASE_URL || '';
   const supabasePublishableKey = env.SUPABASE_PUBLISHABLE_KEY || '';
   const supabaseServiceKey = env.SUPABASE_SERVICE_ROLE_KEY || '';
+  const supabaseAuthVerification = env.SUPABASE_AUTH_VERIFICATION ?? 'jwks';
+  if (!['jwks', 'auth-server'].includes(supabaseAuthVerification)) throw new Error('SUPABASE_AUTH_VERIFICATION must be jwks or auth-server.');
+  if (supabaseAuthVerification === 'auth-server') {
+    let valid = false;
+    try {
+      const url = new URL(supabaseUrl);
+      valid = url.protocol === 'https:' && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash && supabaseUrl === url.origin;
+    } catch { /* Invalid URLs are reported without including configuration values. */ }
+    if (!valid) throw new Error('Auth-server verification requires SUPABASE_URL to be a canonical HTTPS origin without credentials, path, query, fragment or trailing slash.');
+  }
   const mcpOAuthEnabled=env.APPSCREEN_MCP_OAUTH==='true';
+  if (supabaseAuthVerification === 'auth-server' && mcpOAuthEnabled) throw new Error('Auth-server verification supports browser sessions only. MCP OAuth requires JWKS verification.');
   const emailEnabled=env.APPSCREEN_EMAIL_ENABLED==='true';
   const emailFrom=env.APPSCREEN_EMAIL_FROM||'';
   const resendKey=env.RESEND_API_KEY||'',resendWebhookSecret=env.RESEND_WEBHOOK_SECRET||'';
@@ -42,7 +53,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   if(production&&supabaseUrl&&!supabaseUrl.startsWith('https://'))throw new Error('Production Supabase must use HTTPS.');
   return {
     production, developmentAuth, port, host: developmentAuth ? '127.0.0.1' : (env.HOST || '0.0.0.0'), baseUrl,
-    signingSecret, databaseUrl, supabaseUrl, supabasePublishableKey, supabaseServiceKey,
+    signingSecret, databaseUrl, supabaseUrl, supabasePublishableKey, supabaseServiceKey, supabaseAuthVerification,
     mcpOAuthEnabled,mcpResource:new URL('/mcp',baseUrl).href,operatorUserIds,
     emailEnabled,emailFrom,resendKey,resendWebhookSecret,
     storageBucket: env.SUPABASE_STORAGE_BUCKET || 'appscreen-private',

@@ -5,13 +5,14 @@ import type { Config } from './config.js';
 import { transaction, type DB } from './db.js';
 import { AppError, invariant } from './errors.js';
 import { recordMilestone } from './product-metrics.js';
+import { verifyAuthServerToken } from './auth-server.js';
 
 export const ALL_SCOPES = ['projects:read','projects:write','assets:write','exports:write','ai:run'] as const;
 export type Context = { userId: string; workspaceId: string; email: string; role: string; scopes: string[]; authKind: 'web'|'development'|'mcp'; assuranceLevel?:'aal1'|'aal2'; connection?:{kind:'token'|'oauth';id:string;version?:number} };
 export const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 export function createAuth(db: DB, config: Config) {
   const signingKey = new TextEncoder().encode(config.signingSecret);
-  const jwks = config.supabaseUrl ? createRemoteJWKSet(new URL(`${config.supabaseUrl}/auth/v1/.well-known/jwks.json`)) : null;
+  const jwks = config.supabaseUrl && config.supabaseAuthVerification !== 'auth-server' ? createRemoteJWKSet(new URL(`${config.supabaseUrl}/auth/v1/.well-known/jwks.json`)) : null;
   async function ensureWorkspace(userId: string, email: string) {
     return transaction(db, async client => {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`user:${userId}`]);
@@ -43,6 +44,7 @@ export function createAuth(db: DB, config: Config) {
     let claims;
     try {
       if(config.developmentAuth) claims=(await jwtVerify(bearer,signingKey,{issuer:'appscreen-development',audience:'appscreen',algorithms:['HS256']})).payload;
+      else if(config.supabaseAuthVerification==='auth-server') claims=await verifyAuthServerToken(bearer,config);
       else { invariant(jwks,'AUTH_UNAVAILABLE','Authentication is not configured.',503); claims=(await jwtVerify(bearer,jwks,{issuer:`${config.supabaseUrl}/auth/v1`,audience:config.mcpOAuthEnabled?['authenticated',config.mcpResource]:'authenticated'})).payload; }
     } catch { throw new AppError('AUTH_INVALID','Your session expired. Sign in again.',401); }
     invariant(claims.sub,'AUTH_INVALID','Invalid account identity.',401);

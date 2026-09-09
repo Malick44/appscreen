@@ -41,6 +41,7 @@ test('SaaS Compose resolves distinct processes with identical safe runtime confi
     assert.equal(service.environment.DATABASE_URL, fixture.DATABASE_URL);
     assert.equal(service.environment.APPSCREEN_SIGNING_SECRET, fixture.APPSCREEN_SIGNING_SECRET);
     assert.equal(service.environment.NODE_ENV, 'production');
+    assert.equal(service.environment.SUPABASE_AUTH_VERIFICATION, 'jwks');
     for (const setting of ['APPSCREEN_DEV_AUTH', 'APPSCREEN_EMBEDDED_WORKER', 'APPSCREEN_ENABLE_AI', 'APPSCREEN_MCP_OAUTH', 'APPSCREEN_EMAIL_ENABLED']) assert.equal(service.environment[setting], 'false', setting);
     for (const setting of ['OPENAI_API_KEY', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'STRIPE_PRO_PRICE_ID', 'RESEND_API_KEY', 'RESEND_WEBHOOK_SECRET']) assert.equal(service.environment[setting], '', setting);
     assert.equal(service.ports, undefined, 'Only the managed HTTPS proxy may publish the web service');
@@ -56,6 +57,17 @@ test('SaaS Compose resolves distinct processes with identical safe runtime confi
   assert.equal(services.web.healthcheck.test[0], 'CMD');
   assert.match(services.web.healthcheck.test.at(-1), /response\.json\(\)/);
   assert.match(services.web.healthcheck.test.at(-1), /status !== 'ok'/);
+});
+
+test('SaaS Compose passes an explicit self-hosted verification mode to both processes', options, () => {
+  const result = inspect({ ...fixture, SUPABASE_AUTH_VERIFICATION: 'auth-server' });
+  assert.equal(result.status, 0, result.stderr);
+  const { services } = JSON.parse(result.stdout);
+  for (const service of Object.values(services)) {
+    assert.equal(service.environment.SUPABASE_AUTH_VERIFICATION, 'auth-server');
+    assert.equal(service.environment.APPSCREEN_MCP_OAUTH, 'false');
+    assert.equal(service.environment.APPSCREEN_DEV_AUTH, 'false');
+  }
 });
 
 test('SaaS Compose refuses unset or empty production settings before any deployment', options, () => {
